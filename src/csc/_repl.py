@@ -33,6 +33,10 @@ def repl(script):
         print()
         inp = input()
 
+        if script._repl.get("autoclear"):
+            clear_output()
+            print(inp, flush=True)
+
         if not inp.strip():
             continue
 

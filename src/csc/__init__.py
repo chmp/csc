@@ -109,6 +109,8 @@ class CellScript:
             r"^#\s*" + re.escape(self.cell_marker) + r"(.*)$"
         )
 
+        self._repl = {}
+
     @staticmethod
     def _valid_ns(ns, path):
         if ns is not None:
