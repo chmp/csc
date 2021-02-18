@@ -33,6 +33,9 @@ def repl(script):
         print()
         inp = input()
 
+        if not inp.strip():
+            continue
+
         for cmd in _repl_commands:
             cmd_res = cmd(script, inp)
 
