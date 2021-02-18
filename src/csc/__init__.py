@@ -197,7 +197,7 @@ class CellScript:
 
         # include leading new-lines to ensure the line offset of the source
         # matches the file. This is required fo inspect.getsource to work
-        # correctly, which in turn is used for example py torch.jit.script
+        # correctly, which in turn is used for example by torch.jit.script
         source = "\n" * cell.range[0] + cell.source
 
         code = compile(source, str(self.path.resolve()), "exec")
