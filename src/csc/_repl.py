@@ -93,6 +93,14 @@ def command_clear(script, inp):
 
 
 @repl_command
+def command_who(script, inp):
+    if inp.strip() not in {"/who"}:
+        return Result.no_match
+
+    print([k for k in vars(script.ns) if not k.startswith("_")])
+
+
+@repl_command
 def command_eval(script, inp):
     inp = inp.strip()
     if not inp.startswith("/eval "):
@@ -102,6 +110,35 @@ def command_eval(script, inp):
     try:
         res = script.eval(code)
         display(res)
+
+    except:
+        traceback.print_exc()
+
+
+@repl_command
+def command_exec(script, inp):
+    inp = inp.strip()
+    if not inp.startswith("/exec"):
+        return Result.no_match
+
+    inp = inp[len("/exec") :].strip()
+
+    if inp == "":
+        code = []
+        while True:
+            line = input()
+            if not line.strip():
+                break
+
+            code += [line]
+
+        code = "\n".join(code)
+
+    else:
+        code = inp
+
+    try:
+        script.exec(code)
 
     except:
         traceback.print_exc()
@@ -131,18 +168,18 @@ class Result(str, Enum):
 
 # generated wiht https://patorjk.com/software/taag/
 repl_banner = r"""
-   ___ ____ ___ 
+   ___ ____ ___
   / __/ __/ __/
  | (__\__\ (___
   \___/___\___/ {name}
-  
+
 Type /help for available command and /quit to exit
 """[
     1:-1
 ]
 
 repl_help = r"""
-To run a cell simply type its name (or the beginning of its names). In addition 
+To run a cell simply type its name (or the beginning of its names). In addition
 the following commands are available:
 
 /quit | /q
@@ -154,7 +191,13 @@ the following commands are available:
 /clear
     clear the output
 /eval
-    evaluate a statement in the script context and show the result
+    evaluate an expression in the script context and show the result
+/exec {statement}
+    evalute a single statement
+/exec
+    evaluate multi-line statements, end with with an empty line
+/who
+    show variables defined in the script namespace
 """[
     1:-1
 ]
