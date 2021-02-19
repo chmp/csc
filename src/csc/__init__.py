@@ -15,7 +15,7 @@ annotations. For example consider a script to define and train a model::
     ...
 
 Where each of the ``...`` stands for arbitrary user defined code. Using
-``CellScript`` this script can be step by step as::
+``CellScript`` this script can be executed step by step as::
 
     script = CellScript("external_script.py")
 
