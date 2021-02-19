@@ -35,9 +35,7 @@ def repl(script, widget=False):
 
 
 def _cli_repl(script):
-    print(repl_banner.format(name=script.path.name))
-    print("available cells:", *script.list())
-    print()
+    command_banner(script, "/banner")
 
     running = True
     while running:
@@ -49,7 +47,7 @@ def _widget_repl(script):
     from ipywidgets import VBox, Text, Output, Layout
     from IPython.display import display
 
-    user_input = Text()
+    user_input = Text(placeholder="Execute cell / command")
     output = Output()
     layout = Layout(border="solid 1px #555")
     repl = VBox([output, user_input], layout=layout)
@@ -69,9 +67,7 @@ def _widget_repl(script):
             slf.disabled = False
 
     with output:
-        print(repl_banner.format(name=script.path.name))
-        print("available cells:", *script.list())
-        print()
+        command_banner(script, "/banner")
 
     display(repl)
 
@@ -120,6 +116,16 @@ def command_quit(script, inp):
         return Result.no_match
 
     return Result.quit
+
+
+@repl_command
+def command_banner(script, inp):
+    if inp.strip() != "/banner":
+        return Result.no_match
+
+    print(repl_banner.format(name=script.path.name))
+    print("available cells:", *script.list())
+    print()
 
 
 @repl_command
@@ -282,6 +288,8 @@ the following commands are available:
     run the given cells
 /who
     show variables defined in the script namespace
+/banner
+    show the initial banner
 """[
     1:-1
 ]
