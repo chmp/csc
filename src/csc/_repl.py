@@ -1,6 +1,7 @@
 """A repl to interactively run the script"""
-from enum import Enum, auto
+import json
 import traceback
+from enum import Enum, auto
 
 try:
     from IPython.display import clear_output, display
@@ -26,37 +27,83 @@ except ImportError:
         pass
 
 
-def repl(script):
+def repl(script, widget=False):
+    if widget is True:
+        return _widget_repl(script)
+
+    return _cli_repl(script)
+
+
+def _cli_repl(script):
     print(repl_banner.format(name=script.path.name))
+    print("available cells:", *script.list())
+    print()
 
-    while True:
-        print()
+    running = True
+    while running:
         inp = input()
+        running = _repl_step(script, inp)
 
-        if script._repl.get("autoclear"):
-            clear_output()
-            print(inp, flush=True)
 
-        if not inp.strip():
-            continue
+def _widget_repl(script):
+    from ipywidgets import VBox, Text, Output, Layout
+    from IPython.display import display
 
-        for cmd in _repl_commands:
-            cmd_res = cmd(script, inp)
+    user_input = Text()
+    output = Output()
+    layout = Layout(border="solid 1px #555")
+    repl = VBox([output, user_input], layout=layout)
 
-            if cmd_res is None:
-                break
+    @user_input.on_submit
+    def _(slf, *_):
+        inp = slf.value
+        slf.value = ""
 
-            elif cmd_res is Result.quit:
-                return
+        # Ensure to only accept inputs after the last command was evaluated
+        slf.disabled = True
 
-            elif cmd_res is Result.no_match:
-                continue
+        try:
+            with output:
+                _repl_step(script, inp)
+        finally:
+            slf.disabled = False
 
-            else:
-                print(f"Invalid command result: {cmd_res!r}")
+    with output:
+        print(repl_banner.format(name=script.path.name))
+        print("available cells:", *script.list())
+        print()
+
+    display(repl)
+
+
+def _repl_step(script, inp):
+    if script._repl.get("autoclear"):
+        clear_output()
+        print(inp, flush=True)
+
+    if not inp.strip():
+        return True
+
+    for cmd in _repl_commands:
+        cmd_res = cmd(script, inp)
+
+        if cmd_res is None:
+            break
+
+        elif cmd_res is Result.quit:
+            return False
+
+        elif cmd_res is Result.no_match:
+            pass
 
         else:
-            print("Did not understand command")
+            print(f"Invalid command result: {cmd_res!r}")
+
+    else:
+        print("Did not understand command")
+
+    print()
+    return True
 
 
 _repl_commands = []
@@ -88,7 +135,7 @@ def command_list(script, inp):
     if inp.strip() not in {"/list"}:
         return Result.no_match
 
-    print(script.list())
+    print("available cells:", *script.list())
 
 
 @repl_command
@@ -117,6 +164,7 @@ def command_eval(script, inp):
     try:
         res = script.eval(code)
         display(res)
+        show_figures()
 
     except:
         traceback.print_exc()
@@ -146,6 +194,31 @@ def command_exec(script, inp):
 
     try:
         script.exec(code)
+        show_figures()
+
+    except:
+        traceback.print_exc()
+
+
+@repl_command
+def command_run_all(script, inp):
+    inp = inp.strip()
+    if not inp.startswith("/run"):
+        return Result.no_match
+
+    cells = inp[len("/run") :].strip()
+
+    # TODO:support running a list of cells
+
+    try:
+        if cells == "":
+            script.run_all()
+
+        else:
+            cells = json.loads(f"[{cells}]")
+            script.run(*cells)
+
+        show_figures()
 
     except:
         traceback.print_exc()
@@ -203,6 +276,10 @@ the following commands are available:
     evalute a single statement
 /exec
     evaluate multi-line statements, end with with an empty line
+/run
+    run all cells in the script
+/run "cell 1", "cell 2"
+    run the given cells
 /who
     show variables defined in the script namespace
 """[

@@ -4,14 +4,14 @@ import pathlib
 
 import pytest
 
-from csc import CellScript
+import csc
 
 
 def test_example(tmpdir):
     path = pathlib.Path(tmpdir) / "example.py"
     path.write_text(example_script.format(marker="%"))
 
-    example = CellScript(path, cell_marker="%", verbose=False)
+    example = csc.Script(path, cell_marker="%", verbose=False)
     assert example.list() == [None, "foo", "bar", "baz"]
 
     example.run("foo")
@@ -58,7 +58,7 @@ def test_different_marker(tmpdir):
     path = pathlib.Path(tmpdir) / "example.py"
     path.write_text(example_script.format(marker="%%"))
 
-    example = CellScript(path, cell_marker="%%")
+    example = csc.Script(path, cell_marker="%%")
     assert example.list() == [None, "foo", "bar", "baz"]
 
 
@@ -80,7 +80,7 @@ def test_getsource(tmpdir):
     path = pathlib.Path(tmpdir) / "example.py"
     path.write_text(getsource_script.format(func=func))
 
-    example = CellScript(path, cell_marker="%", verbose=False)
+    example = csc.Script(path, cell_marker="%", verbose=False)
     example.run("Cell1")
 
     actual = inspect.getsource(example.ns.foo)
@@ -96,4 +96,30 @@ a = 13
 
 #% Cell2
 b = a + 2
+"""
+
+
+def test_argparse_examples(tmpdir):
+    path = pathlib.Path(tmpdir) / "example.py"
+    path.write_text(argparse_script)
+
+    example = csc.Script(path, cell_marker="%", verbose=False)
+
+    example.run("Run")
+    assert example.ns.args.arg == "foo"
+
+    example.ctx.args = ["--arg", "bar"]
+    example.run("Run")
+    assert example.ns.args.arg == "bar"
+
+
+argparse_script = """
+#% Run
+import argparse
+import csc
+
+_parser = argparse.ArgumentParser()
+_parser.add_argument("--arg", default="foo")
+
+args = _parser.parse_args(csc.get_args())
 """

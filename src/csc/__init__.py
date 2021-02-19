@@ -51,13 +51,24 @@ import types
 
 from typing import Any, Dict, List, Tuple, Union, Optional
 
-from ._parser import _parse_script
+from ._utils import (
+    get,
+    get_args,
+    main,
+    Context as _Context,
+    _active_context,
+    _exec_code,
+    _eval_code,
+    _find_cell,
+    _parse_script,
+    _run_cell,
+)
 
 
-__all__ = ["CellScript"]
+__all__ = ["Script", "get", "get_args", "main"]
 
 
-class CellScript:
+class Script:
     """Allow to execute a python script step by step
 
     ``CellScript`` is designed to be used inside Jupyter notebooks and allows to
@@ -80,17 +91,7 @@ class CellScript:
         with an arbitrary number of spaces allowed.
     :param verbose:
         If True, print a summary of the code executed for each cell.
-    :param ns:
-        The namespace to use for the execution. Per default a new module will
-        be constructed. To share the same namespace with the currently running
-        notebook it can be set to the ``__main__`` module.
     """
-
-    path: pathlib.Path
-    verbose: bool
-    cell_marker: str
-    ns: Any
-    cell_pattern: re.Pattern
 
     def __init__(
         self,
@@ -98,12 +99,16 @@ class CellScript:
         *,
         cell_marker="%%",
         verbose=True,
-        ns=None,
     ):
-        self.path = pathlib.Path(path)
+        path = pathlib.Path(path)
+
+        self.path = path
         self.verbose = verbose
         self.cell_marker = str(cell_marker)
-        self.ns = self._valid_ns(ns, self.path)
+
+        self.ns = types.ModuleType(path.stem)
+        self.ns.__file__ = str(path)
+        self.ctx = _Context()
 
         self.cell_pattern = re.compile(
             r"^#\s*" + re.escape(self.cell_marker) + r"(.*)$"
@@ -111,19 +116,19 @@ class CellScript:
 
         self._repl = {}
 
-    @staticmethod
-    def _valid_ns(ns, path):
-        if ns is not None:
-            return ns
+    def repl(self, widget=False, autoclear=False):
+        """Enter a REPL to control script execution
 
-        ns = types.ModuleType(path.stem)
-        ns.__file__ = str(path)
-        return ns
-
-    def repl(self):
+        :param widget:
+            if ``True``, use an IPython widget for the REPL
+        :param autoclear:
+            if ``True``, clear the repl output before running the current
+            command
+        """
         from ._repl import repl
 
-        repl(self)
+        self._repl["autoclear"] = autoclear
+        repl(self, widget=widget)
 
     def run(self, *cells: Union[int, str]):
         """Execute cells inside the script
@@ -139,7 +144,16 @@ class CellScript:
             if self.verbose and idx != 0:
                 print(file=sys.stderr)
 
-            self._run(parsed_cells, cell)
+            _run_cell(self, parsed_cells, cell)
+
+    def run_all(self):
+        """Run all cells in order define in the script"""
+        parsed_cells = self._parse_script()
+        for idx in range(len(parsed_cells)):
+            if self.verbose and idx != 0:
+                print(file=sys.stderr)
+
+            _run_cell(self, parsed_cells, idx)
 
     def list(self) -> List[Optional[str]]:
         """List the names for all cells inside the script.
@@ -154,7 +168,7 @@ class CellScript:
         See the ``run`` method for details of what values can be used for the
         cell parameter.
         """
-        cell = self._find_cell(self._parse_script(), cell)
+        cell = _find_cell(self._parse_script(), cell)
         return cell.source.splitlines()
 
     def eval(self, expr: str):
@@ -167,10 +181,9 @@ class CellScript:
             ''')
 
         """
-        # NOTE add parens to make multiline expressions safe
-        return eval("(" + expr.strip() + ")", vars(self.ns), vars(self.ns))
+        return _eval_code(self, expr)
 
-    def exec(self, source: str):
+    def exec(self, code: str):
         """Execute a Python block inside the script namespace.
 
         The source is dedented to  allow using  ``.eval`` inside nested
@@ -182,47 +195,8 @@ class CellScript:
                 ''')
 
         """
-        source = source.strip()
-        source = textwrap.dedent(source)
-
-        exec(source, vars(self.ns), vars(self.ns))
+        _exec_code(self, code)
 
     def _parse_script(self) -> List[Tuple[str, str]]:
         with self.path.open("rt") as fobj:
             return _parse_script(fobj, self.cell_pattern)
-
-    def _run(self, parsed_cells: List[Tuple[str, str]], cell: Union[int, str]):
-        cell = self._find_cell(parsed_cells, cell)
-
-        if self.verbose:
-            self._print_cell(cell.source)
-
-        # include leading new-lines to ensure the line offset of the source
-        # matches the file. This is required fo inspect.getsource to work
-        # correctly, which in turn is used for example by torch.jit.script
-        source = "\n" * cell.range[0] + cell.source
-
-        code = compile(source, str(self.path.resolve()), "exec")
-
-        exec(code, vars(self.ns), vars(self.ns))
-
-    def _find_cell(self, parsed_cells, cell):
-        cands = [c for c in parsed_cells if c.matches(cell)]
-
-        if len(cands) == 0:
-            raise ValueError("Could not find cell")
-
-        elif len(cands) > 1:
-            raise ValueError(
-                f"Found multiple cells: {', '.join(str(c.name) for c in cands)}"
-            )
-
-        return cands[0]
-
-    def _print_cell(self, cell_source):
-        lines = ["> " + line for line in cell_source.strip().splitlines()]
-
-        if len(lines) > 10:
-            lines = lines[:9] + ["..."]
-
-        print("\n".join(lines), file=sys.stderr)
