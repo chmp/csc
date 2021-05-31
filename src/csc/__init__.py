@@ -11,7 +11,7 @@ annotations. For example consider a script to define and train a model::
     #%% Train
     ...
 
-    #%% Save  
+    #%% Save
     ...
 
 Where each of the ``...`` stands for arbitrary user defined code. Using
@@ -23,7 +23,7 @@ Where each of the ``...`` stands for arbitrary user defined code. Using
     script.run("Train")
     script.run("Save")
 
-To list all available cells use ``script.list()``. 
+To list all available cells use ``script.list()``.
 
 The variables defined inside the script can be accessed and modified using the
 ``ns`` attribute of the script. One example would be to define a parameter cell
