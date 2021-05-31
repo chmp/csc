@@ -67,6 +67,17 @@ from ._utils import (
 
 __all__ = ["Script", "get", "get_args", "main"]
 
+DEFAULT_CELL_MARKER = "%%"
+DEFAULT_VERBOSE = True
+DEFAULT_REPL_WIDGET = False
+DEFAULT_REPL_AUTOCLEAR = False
+
+
+def repl(path, *,cell_marker=DEFAULT_CELL_MARKER, verbose=DEFAULT_VERBOSE, widget=DEFAULT_REPL_WIDGET, autoclear=DEFAULT_REPL_AUTOCLEAR):
+    script = Script(path, cell_marker=cell_marker, verbose=verbose)
+    script.repl(widget=widget, autoclear=autoclear)
+    return script
+
 
 class Script:
     """Allow to execute a python script step by step
@@ -97,8 +108,8 @@ class Script:
         self,
         path,
         *,
-        cell_marker="%%",
-        verbose=True,
+        cell_marker=DEFAULT_CELL_MARKER,
+        verbose=DEFAULT_VERBOSE,
     ):
         path = pathlib.Path(path)
 
@@ -116,7 +127,7 @@ class Script:
 
         self._repl = {}
 
-    def repl(self, widget=False, autoclear=False):
+    def repl(self, widget=DEFAULT_REPL_WIDGET, autoclear=DEFAULT_REPL_AUTOCLEAR):
         """Enter a REPL to control script execution
 
         :param widget:
@@ -200,3 +211,6 @@ class Script:
     def _parse_script(self) -> List[Tuple[str, str]]:
         with self.path.open("rt") as fobj:
             return _parse_script(fobj, self.cell_pattern)
+
+    def __repr__(self):
+        return f"<csc.Script path={self.path!s}>"

@@ -40,7 +40,7 @@ def get_args():
     )
 
 
-def get(key, default_func):
+def get(key, default_func=None):
     """Lookup or compute a context variable
 
     If the script is executed in a csc context and the ``key`` variable is
@@ -52,6 +52,9 @@ def get(key, default_func):
 
     if ctx is not None and hasattr(ctx, key):
         return getattr(ctx, key)
+
+    elif default_func is None:
+        return None
 
     else:
         return default_func(ctx is not None)
@@ -146,6 +149,9 @@ def _run_cell(script, parsed_cells, cell):
 
     with _active_context(script.ctx):
         exec(code, vars(script.ns), vars(script.ns))
+
+    if script.verbose:
+        print("[done]", file=sys.stderr)
 
 
 def _eval_code(script, code):
