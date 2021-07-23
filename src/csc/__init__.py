@@ -1,8 +1,8 @@
 """Execution of scripts section by section.
 
 Sometimes it may be helpful to run individual parts of a script inside an
-interactive environment, for example Jupyter Notebooks. ``CellScript`` is
-designed to support this use case. The basis are Pythn scripts with special cell
+interactive environment, for example Jupyter Notebooks. ``csc`` is designed to
+support this use case. The basis are Pythn scripts with special cell
 annotations. For example consider a script to define and train a model::
 
     #%% Setup
@@ -15,15 +15,15 @@ annotations. For example consider a script to define and train a model::
     ...
 
 Where each of the ``...`` stands for arbitrary user defined code. Using
-``CellScript`` this script can be executed step by step as::
+``csc.Script`` this script can be executed step by step as::
 
-    script = CellScript("external_script.py")
+    script = csc.Script("external_script.py")
 
-    script.run("Setup")
-    script.run("Train")
-    script.run("Save")
+    script["Setup"].run()
+    script["Train].run()
+    script["Save"].run()
 
-To list all available cells use ``script.list()``.
+To list all available cells use ``script.names()``.
 
 The variables defined inside the script can be accessed and modified using the
 ``ns`` attribute of the script. One example would be to define a parameter cell
@@ -36,181 +36,222 @@ remaining cells. Assume the script defines a parameter cell as follows::
 
 Then the parameters can be modified as in::
 
-    script.run("Parameters")
+    script["Parameters"].run()
     script.ns.hidden_units = 64
     script.ns.activation = 'sigmoid'
 
 """
-import contextlib
-import enum
+import io
 import pathlib
 import re
-import sys
-import textwrap
-import types
+from types import ModuleType
 
-from typing import Any, Dict, List, Tuple, Union, Optional
-
-from ._utils import (
-    get,
-    get_args,
-    main,
-    Context as _Context,
-    _active_context,
-    _exec_code,
-    _eval_code,
-    _find_cell,
-    _parse_script,
-    _run_cell,
-)
+from typing import List, Optional, Tuple, Type, Union
 
 
-__all__ = ["Script", "get", "get_args", "main"]
+class ScriptBase:
+    def run(self):
+        for cell in self.cells():
+            cell.run(self.ns)
 
-DEFAULT_CELL_MARKER = "%%"
-DEFAULT_VERBOSE = True
-DEFAULT_REPL_WIDGET = False
-DEFAULT_REPL_AUTOCLEAR = False
+    def names(self):
+        return [cell.name for cell in self.cells()]
+
+    def __iter__(self):
+        raise TypeError(
+            "Scripts cannot be iterated over. Use .parse() or .names() to iterate "
+            "over the cells or their names respectively."
+        )
+
+    def __repr__(self) -> str:
+        self_type = type(self).__name__
+        try:
+            cells = self.parse()
+
+        except Exception as e:
+            return f"<{self_type} invalid {e!r}>"
+
+        cells = [cell.name for cell in cells]
+        return f"<{self_type} {cells}>"
 
 
-def repl(path, *,cell_marker=DEFAULT_CELL_MARKER, verbose=DEFAULT_VERBOSE, widget=DEFAULT_REPL_WIDGET, autoclear=DEFAULT_REPL_AUTOCLEAR):
-    script = Script(path, cell_marker=cell_marker, verbose=verbose)
-    script.repl(widget=widget, autoclear=autoclear)
-    return script
-
-
-class Script:
-    """Allow to execute a python script step by step
-
-    ``CellScript`` is designed to be used inside Jupyter notebooks and allows to
-    execute an external script with special cell annotations cell by cell. The
-    script is reloaded before execution, but the namespace is persisted on this
-    ``CellScript`` instance.
-
-    The namespace of the script is available via the ``ns`` attribute::
-
-        train_script("Setup")
-        print("parameters:", sorted(train_script.ns.model.state_dict()))
-
-        train_script("Train")
-        train_script.ns.model
+class Script(ScriptBase):
+    """A script with cells defined by comments
 
     :param path:
         The path of the script, can be a string or a :class:`pathlib.Path`.
     :param cell_marker:
         The cell marker used. Cells are defined as ``# {CELL_MARKER} {NAME}``,
         with an arbitrary number of spaces allowed.
-    :param verbose:
-        If True, print a summary of the code executed for each cell.
     """
 
-    def __init__(
-        self,
-        path,
-        *,
-        cell_marker=DEFAULT_CELL_MARKER,
-        verbose=DEFAULT_VERBOSE,
-    ):
-        path = pathlib.Path(path)
+    def __init__(self, path: Union[pathlib.Path, str], cell_marker: str = "%%"):
+        script_file = ScriptFile(path, cell_marker)
 
-        self.path = path
-        self.verbose = verbose
-        self.cell_marker = str(cell_marker)
+        self.script_file = script_file
+        self.ns = ModuleType(script_file.path.stem)
+        self.ns.__file__ = str(script_file.path)
+        self.ns.__csc__ = True
 
-        self.ns = types.ModuleType(path.stem)
-        self.ns.__file__ = str(path)
-        self.ctx = _Context()
+    @property
+    def path(self):
+        return self.script_file.path
 
-        self.cell_pattern = re.compile(
-            r"^#\s*" + re.escape(self.cell_marker) + r"(.*)$"
-        )
+    @property
+    def cell_marker(self):
+        return self.script_file.cell_marker
 
-        self._repl = {}
+    def __getitem__(self, selection):
+        return ScriptSubset(self, selection)
 
-    def repl(self, widget=DEFAULT_REPL_WIDGET, autoclear=DEFAULT_REPL_AUTOCLEAR):
-        """Enter a REPL to control script execution
+    def cells(self) -> List["Cell"]:
+        return self.script_file.parse()
 
-        :param widget:
-            if ``True``, use an IPython widget for the REPL
-        :param autoclear:
-            if ``True``, clear the repl output before running the current
-            command
-        """
-        from ._repl import repl
 
-        self._repl["autoclear"] = autoclear
-        repl(self, widget=widget)
+class ScriptSubset(ScriptBase):
+    def __init__(self, script, selection):
+        self.script = script
+        self.selection = selection
 
-    def run(self, *cells: Union[int, str]):
-        """Execute cells inside the script
+    @property
+    def ns(self):
+        return self.script.ns
 
-        :param cells:
-            The cells to execute. They can be passed as the index of the cell
-            or its name. Cell names only have to match the beginning of the
-            name, as long as the prefix uniquely defines a cell. For example,
-            instead of ``"Setup training"`` also ``"Setup"`` can be used.
-        """
-        parsed_cells = self._parse_script()
-        for idx, cell in enumerate(cells):
-            if self.verbose and idx != 0:
-                print(file=sys.stderr)
+    def cells(self) -> List["Cell"]:
+        cells = self.script.cells()
+        return [cells[idx] for idx in _normalize_selection(cells, self.selection)]
 
-            _run_cell(self, parsed_cells, cell)
 
-    def run_all(self):
-        """Run all cells in order define in the script"""
-        parsed_cells = self._parse_script()
-        for idx in range(len(parsed_cells)):
-            if self.verbose and idx != 0:
-                print(file=sys.stderr)
+def _normalize_selection(cells, selection):
+    name_to_idx = _LazyeNameToIdxMapper(cells)
 
-            _run_cell(self, parsed_cells, idx)
+    for item in _ensure_list(selection):
+        if item is None or isinstance(item, (int, str)):
+            yield name_to_idx(item)
 
-    def list(self) -> List[Optional[str]]:
-        """List the names for all cells inside the script.
+        elif isinstance(item, slice):
+            start = name_to_idx(item.start) if item.start is not None else None
+            stop = (
+                name_to_idx(item.stop) + 1 if isinstance(item.stop, str) else item.stop
+            )
 
-        If a cell is unnamed, ``None`` will be returned.
-        """
-        return [cell.name for cell in self._parse_script()]
+            cell_indices = range(len(cells))
+            yield from cell_indices[start : stop : item.step]
 
-    def get(self, cell: Union[int, str]) -> List[str]:
-        """Get the source code of a cell
+        else:
+            raise ValueError()
 
-        See the ``run`` method for details of what values can be used for the
-        cell parameter.
-        """
-        cell = _find_cell(self._parse_script(), cell)
-        return cell.source.splitlines()
 
-    def eval(self, expr: str):
-        """Execute an expression inside the script namespace.
+class _LazyeNameToIdxMapper:
+    def __init__(self, cells) -> None:
+        self.cells = cells
+        self._map = None
 
-        The expression can also be passed as a multiline string::
+    def __call__(self, name_or_idx):
+        if isinstance(name_or_idx, int):
+            return name_or_idx
 
-            result = script.eval('''
-                a + b
-            ''')
+        if self._map is None:
+            self._map = {}
 
-        """
-        return _eval_code(self, expr)
+            for idx, cell in enumerate(self.cells):
+                if cell.name in self._map:
+                    raise RuntimeError(
+                        f"Invalid script file: duplicate cell {cell.name}"
+                    )
 
-    def exec(self, code: str):
-        """Execute a Python block inside the script namespace.
+                self._map[cell.name] = idx
 
-        The source is dedented to  allow using  ``.eval`` inside nested
-        blocks::
+        return self._map[name_or_idx]
 
-            if cond:
-                script.exec('''
-                    hello = 'world'
-                ''')
 
-        """
-        _exec_code(self, code)
+def _ensure_list(obj):
+    return [obj] if not isinstance(obj, (list, tuple)) else list(obj)
 
-    def _parse_script(self) -> List[Tuple[str, str]]:
+
+class ScriptFile:
+    path: pathlib.Path
+    cell_marker: str
+    _cell_pattern: re.Pattern
+
+    def __init__(self, path: Union[pathlib.Path, str], cell_marker: str):
+        self.path = pathlib.Path(path).resolve()
+        self.cell_marker = cell_marker
+
+        self._cell_pattern = re.compile(r"^#\s*" + re.escape(cell_marker) + r"(.*)$")
+
+    def parse(self) -> List["Cell"]:
         with self.path.open("rt") as fobj:
-            return _parse_script(fobj, self.cell_pattern)
+            return self._parse(fobj)
 
-    def __repr__(self):
-        return f"<csc.Script path={self.path!s}>"
+    def _parse(self, fobj: io.TextIOBase) -> List["Cell"]:
+        cells = []
+        current_cell_name = None
+        current_cell_lines = []
+        current_cell_start = 0
+
+        def emit(current_line_idx, next_cell_name):
+            nonlocal current_cell_lines, current_cell_name, current_cell_start
+
+            if current_cell_name is not None or any(
+                line.strip() for line in current_cell_lines
+            ):
+                cell = Cell(
+                    name=current_cell_name,
+                    idx=len(cells),
+                    range=(current_cell_start, current_line_idx + 1),
+                    source="".join(current_cell_lines),
+                )
+                cells.append(cell)
+
+            current_cell_start = idx + 1
+            current_cell_name = next_cell_name
+            current_cell_lines = []
+
+        idx = 0
+        for idx, line in enumerate(fobj):
+            m = self._cell_pattern.match(line)
+
+            if m is None:
+                current_cell_lines.append(line)
+
+            else:
+                emit(current_line_idx=idx, next_cell_name=m.group(1).strip())
+
+        emit(current_line_idx=idx, next_cell_name=None)
+
+        return cells
+
+
+class Cell:
+    name: Optional[str]
+    idx: int
+    range: Tuple[int, int]
+    source: str
+
+    def __init__(
+        self, name: Optional[str], idx: int, range: Tuple[int, int], source: str
+    ):
+        self.name = name
+        self.idx = idx
+        self.range = range
+        self.source = source
+
+    def __repr__(self) -> str:
+        source = repr(self.source)
+        if len(source) > 30:
+            source = source[:27] + "..."
+
+        return f"<Cell name={self.name!r} source={source}>"
+
+    def run(self, ns):
+        if not hasattr(ns, "__file__"):
+            raise RuntimeError("Namespace must have a valid __file__ attribute")
+
+        # include leading new-lines to ensure the line offset of the source
+        # matches the file. This is required fo inspect.getsource to work
+        # correctly, which in turn is used for example by torch.jit.script
+        source = "\n" * self.range[0] + self.source
+
+        code = compile(source, ns.__file__, "exec")
+        exec(code, vars(ns), vars(ns))

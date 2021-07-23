@@ -7,41 +7,41 @@ pip install csc
 ```
 
 Sometimes it may be helpful to run individual parts of a script inside an
-interactive environment, for example Jupyter Notebooks. `CellScript` is designed
-to support this use case. The basis are Python scripts with special cell
-annotations. For example consider a script to define and train a model:
+interactive environment, for example Jupyter Notebooks. ``csc`` is designed to
+support this use case. The basis are Pythn scripts with special cell
+annotations. For example consider a script to define and train a model::
 
-```python
-#%% Setup
-...
+    #%% Setup
+    ...
 
-#%% Train
-...
+    #%% Train
+    ...
 
-#%% Save  
-...
-```
+    #%% Save
+    ...
 
+Where each of the ``...`` stands for arbitrary user defined code. Using
+``csc.Script`` this script can be executed step by step as::
 
-Here each of the `...` stands for arbitrary user defined code. Using
-`CellScript` this script can be executed step by step as:
+    script = csc.Script("external_script.py")
 
-```python
-from csc import CellScript
+    script["Setup"].run()
+    script["Train].run()
+    script["Save"].run()
 
-script = CellScript("external_script.py")
+To list all available cells use ``script.names()``.
 
-# List available cells
-script.list()
+The variables defined inside the script can be accessed and modified using the
+``ns`` attribute of the script. One example would be to define a parameter cell
+with default parameters and the overwrite the values before executing the
+remaining cells. Assume the script defines a parameter cell as follows::
 
-# Execute cells
-script.run("Setup")
-script.run("Train")
-script.run("Save")
+    #%% Parameters
+    hidden_units = 128
+    activation = 'relu'
 
-# Open a REPL
-script.repl()
+Then the parameters can be modified as in::
 
-# Access variables defined in the script namespace
-script.ns.variable
-``` 
+    script["Parameters"].run()
+    script.ns.hidden_units = 64
+    script.ns.activation = 'sigmoid'
