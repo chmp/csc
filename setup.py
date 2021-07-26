@@ -4,7 +4,7 @@ from setuptools import setup, PEP420PackageFinder
 
 setup(
     name="csc",
-    version="21.7.0",
+    version="21.7.1",
     description="Run python scripts cell by cell.",
     long_description=pathlib.Path("Readme.md").read_text(),
     long_description_content_type="text/markdown",
