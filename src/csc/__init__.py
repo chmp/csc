@@ -41,20 +41,26 @@ Then the parameters can be modified as in::
     script.ns.activation = 'sigmoid'
 
 """
-import io
 import pathlib
 import re
 from types import ModuleType
 
-from typing import List, Optional, Tuple, Type, Union
+from typing import List, Optional, TextIO, Tuple, Union
+
+__all__ = ["Script", "export_to_notebook"]
 
 
 class ScriptBase:
-    def run(self):
+    ns: ModuleType
+
+    def cells(self) -> List["Cell"]:
+        raise NotImplementedError()
+
+    def run(self) -> None:
         for cell in self.cells():
             cell.run(self.ns)
 
-    def names(self):
+    def names(self) -> List[Union[None, str]]:
         return [cell.name for cell in self.cells()]
 
     def __iter__(self):
@@ -66,13 +72,13 @@ class ScriptBase:
     def __repr__(self) -> str:
         self_type = type(self).__name__
         try:
-            cells = self.parse()
+            cells = self.cells()
 
         except Exception as e:
             return f"<{self_type} invalid {e!r}>"
 
-        cells = [cell.name for cell in cells]
-        return f"<{self_type} {cells}>"
+        cell_names = [cell.name for cell in cells]
+        return f"<{self_type} {cell_names}>"
 
 
 class Script(ScriptBase):
@@ -91,7 +97,7 @@ class Script(ScriptBase):
         self.script_file = script_file
         self.ns = ModuleType(script_file.path.stem)
         self.ns.__file__ = str(script_file.path)
-        self.ns.__csc__ = True
+        self.ns.__csc__ = True  # type: ignore
 
     @property
     def path(self):
@@ -106,6 +112,9 @@ class Script(ScriptBase):
 
     def cells(self) -> List["Cell"]:
         return self.script_file.parse()
+
+    def _ipython_key_completions_(self):
+        return self.names()
 
 
 class ScriptSubset(ScriptBase):
@@ -184,11 +193,11 @@ class ScriptFile:
         with self.path.open("rt") as fobj:
             return self._parse(fobj)
 
-    def _parse(self, fobj: io.TextIOBase) -> List["Cell"]:
-        cells = []
-        current_cell_name = None
-        current_cell_lines = []
-        current_cell_start = 0
+    def _parse(self, fobj: TextIO) -> List["Cell"]:
+        cells: List[Cell] = []
+        current_cell_name: Optional[str] = None
+        current_cell_lines: List[str] = []
+        current_cell_start: int = 0
 
         def emit(current_line_idx, next_cell_name):
             nonlocal current_cell_lines, current_cell_name, current_cell_start
@@ -255,3 +264,10 @@ class Cell:
 
         code = compile(source, ns.__file__, "exec")
         exec(code, vars(ns), vars(ns))
+
+
+def export_to_notebook(script, *names):
+    import __main__
+
+    for name in names:
+        setattr(__main__, name, getattr(script.ns, name))

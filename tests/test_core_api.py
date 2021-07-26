@@ -22,7 +22,11 @@ def script(tmpdir):
 
 def test_repr_works(script):
     repr(script)
-    repr(script["Run"])
+    repr(script["Third"])
+
+    assert "First" in repr(script)
+    assert "Third" in repr(script["Third"])
+    assert "First" not in repr(script["Third"])
 
 
 def test_names(script):

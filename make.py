@@ -17,6 +17,7 @@ arg = lambda *a, **k: _md(lambda f: _as(f).insert(0, (a, k)))
 @cmd()
 def precommit():
     format()
+    check()
     test()
 
 
@@ -46,6 +47,11 @@ def format():
         "setup.py",
         "make.py",
     )
+
+
+@cmd()
+def check():
+    python("mypy", "src")
 
 
 @cmd()
