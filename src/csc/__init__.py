@@ -99,6 +99,13 @@ class Script(ScriptBase):
     :param cwd:
         If not ``None``, change the working directory to it during the script
         execution.
+
+    .. warning::
+
+        Execution of scripts is non threadsafe when the execution environment
+        is modified via ``args`` or ``cwd`` as it changes the global Python
+        interpreter state.
+
     """
 
     def __init__(
@@ -299,6 +306,12 @@ class Cell:
 
 
 def export_to_notebook(script, *names):
+    """Export the given variables to the ``__main__`` module.
+
+    In a notebook environment the ``__main__`` module is namespace in which
+    the user code is executed. By exporting variables to ``__main__``, they
+    become global variables inside the notebook scope.
+    """
     import __main__
 
     for name in names:
