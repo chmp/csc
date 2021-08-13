@@ -41,24 +41,28 @@ Then the parameters can be modified as in::
     script.ns.activation = 'sigmoid'
 
 """
+import contextlib
+import os
 import pathlib
 import re
+import sys
 from types import ModuleType
 
-from typing import List, Optional, TextIO, Tuple, Union
+from typing import List, Optional, Sequence, TextIO, Tuple, Union
 
 __all__ = ["Script", "export_to_notebook"]
 
 
 class ScriptBase:
     ns: ModuleType
+    env: "Env"
 
     def cells(self) -> List["Cell"]:
         raise NotImplementedError()
 
     def run(self) -> None:
         for cell in self.cells():
-            cell.run(self.ns)
+            cell.run(self.ns, self.env)
 
     def names(self) -> List[Union[None, str]]:
         return [cell.name for cell in self.cells()]
@@ -89,12 +93,34 @@ class Script(ScriptBase):
     :param cell_marker:
         The cell marker used. Cells are defined as ``# {CELL_MARKER} {NAME}``,
         with an arbitrary number of spaces allowed.
+    :param args:
+        If not ``None``, the command line arguments of the script. While a cell
+        is executed, ``sys.argv`` is set to ``[script_name, *args]``.
+    :param cwd:
+        If not ``None``, change the working directory to it during the script
+        execution.
     """
 
-    def __init__(self, path: Union[pathlib.Path, str], cell_marker: str = "%%"):
+    def __init__(
+        self,
+        path: Union[pathlib.Path, str],
+        cell_marker: str = "%%",
+        args: Optional[Sequence[str]] = None,
+        cwd: Optional[Union[str, os.PathLike]] = None,
+    ):
         script_file = ScriptFile(path, cell_marker)
 
+        if args is not None:
+            args = [script_file.path.name, *args]
+
+        if cwd is not None:
+            cwd = pathlib.Path(cwd)
+
+        env = Env(args=args, cwd=cwd)
+
         self.script_file = script_file
+        self.env = env
+
         self.ns = ModuleType(script_file.path.stem)
         self.ns.__file__ = str(script_file.path)
         self.ns.__csc__ = True  # type: ignore
@@ -125,6 +151,10 @@ class ScriptSubset(ScriptBase):
     @property
     def ns(self):
         return self.script.ns
+
+    @property
+    def env(self):
+        return self.script.env
 
     def cells(self) -> List["Cell"]:
         cells = self.script.cells()
@@ -253,7 +283,7 @@ class Cell:
 
         return f"<Cell name={self.name!r} source={source}>"
 
-    def run(self, ns):
+    def run(self, ns, env: "Env"):
         if not hasattr(ns, "__file__"):
             raise RuntimeError("Namespace must have a valid __file__ attribute")
 
@@ -263,7 +293,9 @@ class Cell:
         source = "\n" * self.range[0] + self.source
 
         code = compile(source, ns.__file__, "exec")
-        exec(code, vars(ns), vars(ns))
+
+        with env.patch():
+            exec(code, vars(ns), vars(ns))
 
 
 def export_to_notebook(script, *names):
@@ -271,3 +303,46 @@ def export_to_notebook(script, *names):
 
     for name in names:
         setattr(__main__, name, getattr(script.ns, name))
+
+
+class Env:
+    """ "Customize the environment the script is executed in"""
+
+    def __init__(self, args: Optional[List[str]], cwd: Optional[pathlib.Path]):
+        self.args = args
+        self.cwd = cwd
+
+    @contextlib.contextmanager
+    def patch(self):
+        with self._patch_args(), self._patch_cwd():
+            yield
+
+    @contextlib.contextmanager
+    def _patch_args(self):
+        if self.args is None:
+            yield
+            return
+
+        prev_args = sys.argv
+        sys.argv = self.args
+
+        try:
+            yield
+
+        finally:
+            sys.argv = prev_args
+
+    @contextlib.contextmanager
+    def _patch_cwd(self):
+        if self.cwd is None:
+            yield
+            return
+
+        prev_cwd = os.getcwd()
+        os.chdir(self.cwd)
+
+        try:
+            yield
+
+        finally:
+            os.chdir(prev_cwd)
