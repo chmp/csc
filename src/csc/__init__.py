@@ -42,13 +42,14 @@ Then the parameters can be modified as in::
 
 """
 import contextlib
+import io
 import os
 import pathlib
 import re
 import sys
 from types import ModuleType
 
-from typing import List, Optional, Sequence, TextIO, Tuple, Union
+from typing import Iterator, List, Optional, Sequence, TextIO, Tuple, Union, cast
 
 __all__ = ["Script", "export_to_notebook"]
 
@@ -224,7 +225,9 @@ class ScriptFile:
         self.path = pathlib.Path(path).resolve()
         self.cell_marker = cell_marker
 
-        self._cell_pattern = re.compile(r"^#\s*" + re.escape(cell_marker) + r"(.*)$")
+        self._cell_pattern = re.compile(
+            r"^#\s*" + re.escape(cell_marker) + r"\s+(\[(\w+)\])?(.*)$"
+        )
 
     def parse(self) -> List["Cell"]:
         with self.path.open("rt") as fobj:
@@ -233,11 +236,12 @@ class ScriptFile:
     def _parse(self, fobj: TextIO) -> List["Cell"]:
         cells: List[Cell] = []
         current_cell_name: Optional[str] = None
+        current_cell_type: Optional[str] = None
         current_cell_lines: List[str] = []
         current_cell_start: int = 0
 
-        def emit(current_line_idx, next_cell_name):
-            nonlocal current_cell_lines, current_cell_name, current_cell_start
+        def emit(current_line_idx, next_cell_name, next_cell_type):
+            nonlocal current_cell_lines, current_cell_name, current_cell_start, current_cell_type
 
             if current_cell_name is not None or any(
                 line.strip() for line in current_cell_lines
@@ -247,11 +251,13 @@ class ScriptFile:
                     idx=len(cells),
                     range=(current_cell_start, current_line_idx + 1),
                     source="".join(current_cell_lines),
+                    type=current_cell_type if current_cell_type is not None else "code",
                 )
                 cells.append(cell)
 
             current_cell_start = idx + 1
             current_cell_name = next_cell_name
+            current_cell_type = next_cell_type
             current_cell_lines = []
 
         idx = 0
@@ -262,9 +268,14 @@ class ScriptFile:
                 current_cell_lines.append(line)
 
             else:
-                emit(current_line_idx=idx, next_cell_name=m.group(1).strip())
+                cell_type = m.group(2)
+                emit(
+                    current_line_idx=idx,
+                    next_cell_name=m.group(3).strip(),
+                    next_cell_type=cell_type.strip() if cell_type is not None else None,
+                )
 
-        emit(current_line_idx=idx, next_cell_name=None)
+        emit(current_line_idx=idx, next_cell_name=None, next_cell_type=None)
 
         return cells
 
@@ -274,14 +285,21 @@ class Cell:
     idx: int
     range: Tuple[int, int]
     source: str
+    type: str
 
     def __init__(
-        self, name: Optional[str], idx: int, range: Tuple[int, int], source: str
+        self,
+        name: Optional[str],
+        idx: int,
+        range: Tuple[int, int],
+        source: str,
+        type: str,
     ):
         self.name = name
         self.idx = idx
         self.range = range
         self.source = source
+        self.type = type
 
     def __repr__(self) -> str:
         source = repr(self.source)
@@ -291,6 +309,16 @@ class Cell:
         return f"<Cell name={self.name!r} source={source}>"
 
     def run(self, ns, env: "Env"):
+        if self.type is None or self.type == "code":
+            self._run_code(ns, env)
+
+        elif self.type == "markdown":
+            self._run_markdown(ns, env)
+
+        else:
+            print(f"Unknown cell type {self.type}", file=sys.stderr)
+
+    def _run_code(self, ns, env: "Env"):
         if not hasattr(ns, "__file__"):
             raise RuntimeError("Namespace must have a valid __file__ attribute")
 
@@ -304,6 +332,16 @@ class Cell:
         with env.patch():
             exec(code, vars(ns), vars(ns))
 
+    def _run_markdown(self, ns, env: "Env"):
+        try:
+            from IPython.display import display_markdown
+
+        except ImportError:
+            display_markdown = lambda code, raw: print(code)
+
+        source = "\n".join(line[2:] for line in self.source.splitlines())
+        display_markdown(source, raw=True)
+
 
 def export_to_notebook(script, *names):
     """Export the given variables to the ``__main__`` module.
@@ -316,6 +354,63 @@ def export_to_notebook(script, *names):
 
     for name in names:
         setattr(__main__, name, getattr(script.ns, name))
+
+
+def notebook_to_script(
+    notebook: Union[str, os.PathLike, TextIO],
+    script: Union[str, os.PathLike, TextIO],
+    cell_marker: str = "%%",
+):
+    """Convert a Jupyter notebook to a script file that csc can parse"""
+    import nbformat
+
+    # NOTE: nbformat does not handle Path objects
+    with _as_fobj(notebook, mode="r") as notebook_fobj:
+        nb = nbformat.read(notebook_fobj, as_version=4)
+
+    unknown_cell_types = set()
+
+    cell_prefixes = {
+        "markdown": "[markdown] ",
+        "code": "",
+    }
+    line_prefixes = {
+        "markdown": "# ",
+        "code": "",
+    }
+
+    with _as_fobj(script, mode="w") as script_fobj:
+        idx = 0
+        for cell in nb.cells:
+            if cell.cell_type in {"markdown", "code"}:
+                cell_prefix = cell_prefixes[cell.cell_type]
+                line_prefix = line_prefixes[cell.cell_type]
+
+                script_fobj.write(f"#{cell_marker} {cell_prefix}Cell {idx}\n")
+                for line in cell.source.splitlines():
+                    script_fobj.write(f"{line_prefix}{line}\n")
+
+                script_fobj.write("\n")
+                idx += 1
+
+            else:
+                unknown_cell_types.add(cell.cell_type)
+
+    if unknown_cell_types:
+        print(f"Unknown cell types: {unknown_cell_types}", file=sys.stderr)
+
+
+@contextlib.contextmanager
+def _as_fobj(
+    path_or_fobj: Union[str, os.PathLike, TextIO],
+    mode: str,
+) -> Iterator[TextIO]:
+    if not isinstance(path_or_fobj, (str, pathlib.Path)):
+        yield cast(TextIO, path_or_fobj)
+
+    else:
+        with open(path_or_fobj, mode + "t") as fobj:
+            yield cast(TextIO, fobj)
 
 
 class Env:
