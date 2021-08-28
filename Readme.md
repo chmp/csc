@@ -1,47 +1,74 @@
 # csc - execute scripts one cell at a time
 
+## Installation
+
 Install with
 
 ```bash
 pip install csc
 ```
 
+## Usage
+
 Sometimes it may be helpful to run individual parts of a script inside an
 interactive environment, for example Jupyter Notebooks. ``csc`` is designed to
 support this use case. The basis are Pythn scripts with special cell
-annotations. For example consider a script to define and train a model::
+annotations. For example consider a script to define and train a model:
 
-    #%% Setup
-    ...
+```python
+#%% [setup] Parameters
+...
 
-    #%% Train
-    ...
+#%% [setup] Setup
+...
 
-    #%% Save
-    ...
+#%% Train
+...
 
-Where each of the ``...`` stands for arbitrary user defined code. Using
-``csc.Script`` this script can be executed step by step as::
+#%% Save
+...
+```
 
-    script = csc.Script("external_script.py")
+Where each of the ``...`` stands for arbitrary user defined code. And the names
+inside brackets are tags. Using ``csc.Script`` this script can be executed as:
 
-    script["Setup"].run()
-    script["Train].run()
-    script["Save"].run()
+```python
+script = csc.Script("external_script.py")
+script.run()
+```
 
-To list all available cells use ``script.names()``.
+To modify the parameters, e.g., modify the number of hidden units, the script
+can be executed step by step. The variables defined inside the script can be
+accessed and modified using the ``ns`` attribute of the script. For example:
 
-The variables defined inside the script can be accessed and modified using the
-``ns`` attribute of the script. One example would be to define a parameter cell
-with default parameters and the overwrite the values before executing the
-remaining cells. Assume the script defines a parameter cell as follows::
+```python
+script["Parameters"].run()
+script.ns.hidden_units = 64
+scripts["Setup":].run()
+```
 
-    #%% Parameters
-    hidden_units = 128
-    activation = 'relu'
+To support this common pattern, `csc` offers the splice the function:
 
-Then the parameters can be modified as in::
+```python
+with csc.splice(script, "Parameters"):
+    scripts.ns.hidden_units = 64
+```
 
-    script["Parameters"].run()
+To only define the model without training or saving the results, a subset of the
+script can be selected via tags:
+
+```python
+# execute any cell tagged with "setup"
+scripts[lambda: "setup" in tags].run()
+
+# can also be combined with splicing to modify the parameters
+with csc.splice(script[lambda: "setup" in tags], "Parameters):
     script.ns.hidden_units = 64
-    script.ns.activation = 'sigmoid'
+
+# use the model
+model = script.ns.model
+```
+
+## License
+
+This package is licensed under the MIT License. See `LICENSE` for details.
