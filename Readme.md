@@ -12,7 +12,7 @@ pip install csc
 
 Sometimes it may be helpful to run individual parts of a script inside an
 interactive environment, for example Jupyter Notebooks. ``csc`` is designed to
-support this use case. The basis are Pythn scripts with special cell
+support this use case. The basis are Python scripts with special cell
 annotations. For example consider a script to define and train a model:
 
 ```python
@@ -44,14 +44,14 @@ accessed and modified using the ``ns`` attribute of the script. For example:
 ```python
 script["Parameters"].run()
 script.ns.hidden_units = 64
-scripts["Setup":].run()
+script["Setup":].run()
 ```
 
 To support this common pattern, `csc` offers the splice the function:
 
 ```python
 with csc.splice(script, "Parameters"):
-    scripts.ns.hidden_units = 64
+    script.ns.hidden_units = 64
 ```
 
 To only define the model without training or saving the results, a subset of the
@@ -59,7 +59,7 @@ script can be selected via tags:
 
 ```python
 # execute any cell tagged with "setup"
-scripts[lambda: "setup" in tags].run()
+script[lambda: "setup" in tags].run()
 
 # can also be combined with splicing to modify the parameters
 with csc.splice(script[lambda: "setup" in tags], "Parameters):
