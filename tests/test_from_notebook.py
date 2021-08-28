@@ -35,7 +35,7 @@ def test_example(tmp_path: Path):
     cells = script.cells()
 
     assert cells[0].name == "Cell 0"
-    assert cells[0].type is "code"
+    assert cells[0].tags == set()
 
     assert cells[1].name == "Cell 1"
-    assert cells[1].type == "markdown"
+    assert cells[1].tags == {"markdown"}

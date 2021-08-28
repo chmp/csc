@@ -14,16 +14,43 @@ annotations. For example consider a script to define and train a model::
     #%% Save
     ...
 
-Where each of the ``...`` stands for arbitrary user defined code. Using
-``csc.Script`` this script can be executed step by step as::
+Where each of the ``...`` stands for arbitrary user defined code. Scripts
+support selecting individual cells to limit execution to subsets of a script. To
+list all available cells use ``script.names()``. In the simplest case, select
+one or multiple cells by name::
 
-    script = csc.Script("external_script.py")
+    script["cell 1"]
+    script["cell 1", "cell 2"]
 
-    script["Setup"].run()
-    script["Train].run()
-    script["Save"].run()
+Cells can also be selected by index as in::
 
-To list all available cells use ``script.names()``.
+    script[0, 1, 2]
+
+Slicing is supported for both names and indices::
+
+    # select all cells up to, but excluding "cell 2"
+    script[:"cell 2"]
+
+    # select the first two cells
+    script[:2]
+
+For more flexible selections, also callable can be used. The callable can
+specify cell properties, such as ``name``, ``idx``, ``tags``, as parameters and
+will be called with these properties. A parameter with name cell will be set to
+the cell itself::
+
+    script[lambda name: name == "cell 1"]
+    script[lambda cell: cell.name == "cell 1"]
+
+Functions without arguments are supported as well::
+
+    script[lambda: name == "cell 1"]
+
+Selections of a script can be executed independently as in::
+
+    script[:"cell 3"].run()
+    script["cell 3":].run()
+
 
 The variables defined inside the script can be accessed and modified using the
 ``ns`` attribute of the script. One example would be to define a parameter cell
@@ -40,18 +67,33 @@ Then the parameters can be modified as in::
     script.ns.hidden_units = 64
     script.ns.activation = 'sigmoid'
 
+A common pattern is to execute an initial part of a script, modify the script
+namespace, and then continue to evaluate the rest of the script. To simplify
+this pattern, scripts support being split::
+
+    head, tail = script.split("Parameters")
+    head.run()
+    script.ns.parameter = 20
+    tail.run()
+
+Or with :func:`slice`::
+
+    with splice(script, "Parameters"):
+        script.ns.hidden_units = 64
+        script.ns.activation = 'sigmoid'
+
 """
 import contextlib
-import io
+import inspect
 import os
 import pathlib
 import re
 import sys
 from types import ModuleType
 
-from typing import Iterator, List, Optional, Sequence, TextIO, Tuple, Union, cast
+from typing import Iterator, List, Optional, Sequence, TextIO, Tuple, Union, cast, Set
 
-__all__ = ["Script", "export_to_notebook"]
+__all__ = ["Script", "export_to_notebook", "notebook_to_script", "splice"]
 
 
 class ScriptBase:
@@ -59,14 +101,37 @@ class ScriptBase:
     env: "Env"
 
     def cells(self) -> List["Cell"]:
+        """Return the cells themselves"""
         raise NotImplementedError()
 
     def run(self) -> None:
+        """Run all cells"""
         for cell in self.cells():
             cell.run(self.ns, self.env)
 
     def names(self) -> List[Union[None, str]]:
+        """Return the names of the cells"""
         return [cell.name for cell in self.cells()]
+
+    def split(self, split_point, inclusive=True) -> Tuple["ScriptBase", "ScriptBase"]:
+        """Split a script into two parts
+
+        The split point can be any object understood by the item selection. It
+        must select a single cell. For ``inclusive=True`` the head  contains
+        all cells up to the tail, the second part the rest.  Otherwise, the
+        selected cell will be found in the tail.
+        """
+        split_point = list(_normalize_selection(self.cells(), split_point))
+        if len(split_point) != 1:
+            raise RuntimeError("split_point must select a single cell")
+
+        split_point = split_point[0]
+        split_point = split_point + 1 if inclusive else split_point
+
+        return self[:split_point], self[split_point:]
+
+    def __getitem__(self, selection):
+        raise NotImplementedError()
 
     def __iter__(self):
         raise TypeError(
@@ -168,6 +233,9 @@ class ScriptSubset(ScriptBase):
         cells = self.script.cells()
         return [cells[idx] for idx in _normalize_selection(cells, self.selection)]
 
+    def __getitem__(self, selection):
+        return ScriptSubset(self, selection)
+
 
 def _normalize_selection(cells, selection):
     name_to_idx = _LazyeNameToIdxMapper(cells)
@@ -178,15 +246,47 @@ def _normalize_selection(cells, selection):
 
         elif isinstance(item, slice):
             start = name_to_idx(item.start) if item.start is not None else None
-            stop = (
-                name_to_idx(item.stop) + 1 if isinstance(item.stop, str) else item.stop
-            )
+            stop = name_to_idx(item.stop) if item.stop is not None else None
 
             cell_indices = range(len(cells))
             yield from cell_indices[start : stop : item.step]
 
+        elif callable(item):
+            yield from (
+                idx
+                for idx, cell in enumerate(cells)
+                if _eval_cell_predicate(item, cell)
+            )
+
         else:
-            raise ValueError()
+            raise ValueError(f"Invalid selector {item}")
+
+
+def _eval_cell_predicate(predicate, cell):
+    """Evaluate a cell predicate
+
+    For details on the semantics see the documentation of :class:`Script`.
+    """
+    scope = dict(cell=cell, name=cell.name, idx=cell.idx, tags=cell.tags)
+
+    signature = inspect.signature(predicate)
+
+    if not signature.parameters:
+        return eval(predicate.__code__, scope, scope)
+
+    has_kwargs = any(
+        p.kind is inspect.Parameter.VAR_KEYWORD for p in signature.parameters.values()
+    )
+    if has_kwargs:
+        return predicate(**scope)
+
+    accepted_args = {
+        name: scope[name]
+        for name, p in signature.parameters.items()
+        if p.kind
+        in {inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY}
+    }
+    return predicate(**accepted_args)
 
 
 class _LazyeNameToIdxMapper:
@@ -226,7 +326,7 @@ class ScriptFile:
         self.cell_marker = cell_marker
 
         self._cell_pattern = re.compile(
-            r"^#\s*" + re.escape(cell_marker) + r"\s+(\[(\w+)\])?(.*)$"
+            r"^#\s*" + re.escape(cell_marker) + r"\s+(\[([\w,]+)\])?(.*)$"
         )
 
     def parse(self) -> List["Cell"]:
@@ -234,50 +334,51 @@ class ScriptFile:
             return self._parse(fobj)
 
     def _parse(self, fobj: TextIO) -> List["Cell"]:
-        cells: List[Cell] = []
-        current_cell_name: Optional[str] = None
-        current_cell_type: Optional[str] = None
-        current_cell_lines: List[str] = []
-        current_cell_start: int = 0
+        current_name: Optional[str] = None
+        current_tags: Optional[Set[str]] = None
+        current_lines: List[str] = []
+        current_start: int = 0
 
-        def emit(current_line_idx, next_cell_name, next_cell_type):
-            nonlocal current_cell_lines, current_cell_name, current_cell_start, current_cell_type
+        def parse(fobj):
+            cells: List[Cell] = []
+            idx = 0
 
-            if current_cell_name is not None or any(
-                line.strip() for line in current_cell_lines
-            ):
-                cell = Cell(
-                    name=current_cell_name,
-                    idx=len(cells),
-                    range=(current_cell_start, current_line_idx + 1),
-                    source="".join(current_cell_lines),
-                    type=current_cell_type if current_cell_type is not None else "code",
-                )
-                cells.append(cell)
+            for idx, line in enumerate(fobj):
+                m = self._cell_pattern.match(line)
+                if m is not None:
+                    cells += emit(len(cells), idx, m.group(3).strip(), m.group(2))
 
-            current_cell_start = idx + 1
-            current_cell_name = next_cell_name
-            current_cell_type = next_cell_type
-            current_cell_lines = []
+                else:
+                    current_lines.append(line)
 
-        idx = 0
-        for idx, line in enumerate(fobj):
-            m = self._cell_pattern.match(line)
+            cells += emit(len(cells), idx, None, None)
 
-            if m is None:
-                current_cell_lines.append(line)
+            return cells
 
-            else:
-                cell_type = m.group(2)
-                emit(
-                    current_line_idx=idx,
-                    next_cell_name=m.group(3).strip(),
-                    next_cell_type=cell_type.strip() if cell_type is not None else None,
+        def emit(cell_idx, current_line_idx, next_cell_name, next_tags):
+            nonlocal current_name, current_lines, current_start, current_tags
+
+            if current_name is not None or any(line.strip() for line in current_lines):
+                yield Cell(
+                    name=current_name,
+                    idx=cell_idx,
+                    range=(current_start, current_line_idx + 1),
+                    source="".join(current_lines),
+                    tags=parse_tags(current_tags),
                 )
 
-        emit(current_line_idx=idx, next_cell_name=None, next_cell_type=None)
+            current_start = current_line_idx + 1
+            current_name = next_cell_name
+            current_tags = next_tags
+            current_lines = []
 
-        return cells
+        def parse_tags(tags):
+            if tags is None:
+                return set()
+
+            return {tag.strip() for tag in tags.split(",") if tag.strip()}
+
+        return parse(fobj)
 
 
 class Cell:
@@ -285,7 +386,7 @@ class Cell:
     idx: int
     range: Tuple[int, int]
     source: str
-    type: str
+    tags: Set[str]
 
     def __init__(
         self,
@@ -293,13 +394,13 @@ class Cell:
         idx: int,
         range: Tuple[int, int],
         source: str,
-        type: str,
+        tags: Set[str],
     ):
         self.name = name
         self.idx = idx
         self.range = range
         self.source = source
-        self.type = type
+        self.tags = tags
 
     def __repr__(self) -> str:
         source = repr(self.source)
@@ -309,14 +410,11 @@ class Cell:
         return f"<Cell name={self.name!r} source={source}>"
 
     def run(self, ns, env: "Env"):
-        if self.type is None or self.type == "code":
-            self._run_code(ns, env)
-
-        elif self.type == "markdown":
+        if "markdown" in self.tags:
             self._run_markdown(ns, env)
 
         else:
-            print(f"Unknown cell type {self.type}", file=sys.stderr)
+            self._run_code(ns, env)
 
     def _run_code(self, ns, env: "Env"):
         if not hasattr(ns, "__file__"):
@@ -398,6 +496,22 @@ def notebook_to_script(
 
     if unknown_cell_types:
         print(f"Unknown cell types: {unknown_cell_types}", file=sys.stderr)
+
+
+@contextlib.contextmanager
+def splice(script, split_point, inclusive=True) -> Iterator["ScriptBase"]:
+    """Split the script, run the first part, yield control and run the second part
+
+    Once use case of this function is to execute initial setup cells, modify
+    the script state and then evaluate the rest. For example setup the
+    default parameters, modify the paramters, and the run the rest of the
+    script.
+    """
+    head, tail = script.split(split_point, inclusive)
+
+    head.run()
+    yield script
+    tail.run()
 
 
 @contextlib.contextmanager
