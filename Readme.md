@@ -59,10 +59,10 @@ script can be selected via tags:
 
 ```python
 # execute any cell tagged with "setup"
-script[lambda: "setup" in tags].run()
+script[lambda: tags & {"setup"}].run()
 
 # can also be combined with splicing to modify the parameters
-with csc.splice(script[lambda: "setup" in tags], "Parameters):
+with csc.splice(script[lambda: tags & {"setup"}], "Parameters"):
     script.ns.hidden_units = 64
 
 # use the model
