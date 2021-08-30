@@ -84,6 +84,7 @@ Or with :func:`slice`::
 
 """
 import contextlib
+import fnmatch
 import inspect
 import os
 import pathlib
@@ -99,6 +100,7 @@ __all__ = ["Script", "export_to_notebook", "notebook_to_script", "splice"]
 class ScriptBase:
     ns: ModuleType
     env: "Env"
+    verbose: bool
 
     def cells(self) -> List["Cell"]:
         """Return the cells themselves"""
@@ -106,8 +108,24 @@ class ScriptBase:
 
     def run(self) -> None:
         """Run all cells"""
-        for cell in self.cells():
+        cells = self.cells()
+
+        if self.verbose:
+            print(":: run ", *(cell.name for cell in cells))
+
+        for cell in cells:
             cell.run(self.ns, self.env)
+
+    def eval(self, expr):
+        ns = self.ns
+        return eval(expr, vars(ns), vars(ns))
+
+    def dir(self, pattern=None):
+        names = sorted(vars(self.ns))
+        if pattern is not None:
+            names = [name for name in names if fnmatch.fnmatch(name, pattern)]
+
+        return names
 
     def names(self) -> List[Union[None, str]]:
         """Return the names of the cells"""
@@ -130,6 +148,9 @@ class ScriptBase:
 
         return self[:split_point], self[split_point:]
 
+    def spliced(self, split_point, inclusive=True):
+        return splice(self, split_point, inclusive=inclusive)
+
     def __getitem__(self, selection):
         raise NotImplementedError()
 
@@ -148,7 +169,12 @@ class ScriptBase:
             return f"<{self_type} invalid {e!r}>"
 
         cell_names = [cell.name for cell in cells]
-        return f"<{self_type} {cell_names}>"
+        cell_tags = sorted({tag for cell in cells for tag in cell.tags})
+        return f"<{self_type} cells: {cell_names} tags: {cell_tags}>"
+
+    @property
+    def tags(self):
+        return {tag for cell in self.cells() for tag in cell.tags}
 
 
 class Script(ScriptBase):
@@ -180,6 +206,7 @@ class Script(ScriptBase):
         cell_marker: str = "%%",
         args: Optional[Sequence[str]] = None,
         cwd: Optional[Union[str, os.PathLike]] = None,
+        verbose: bool = True,
     ):
         script_file = ScriptFile(path, cell_marker)
 
@@ -193,6 +220,7 @@ class Script(ScriptBase):
 
         self.script_file = script_file
         self.env = env
+        self.verbose = verbose
 
         self.ns = ModuleType(script_file.path.stem)
         self.ns.__file__ = str(script_file.path)
@@ -228,6 +256,10 @@ class ScriptSubset(ScriptBase):
     @property
     def env(self):
         return self.script.env
+
+    @property
+    def verbose(self):
+        return self.script.verbose
 
     def cells(self) -> List["Cell"]:
         cells = self.script.cells()
@@ -510,7 +542,12 @@ def splice(script, split_point, inclusive=True) -> Iterator["ScriptBase"]:
     head, tail = script.split(split_point, inclusive)
 
     head.run()
+
+    if script.verbose:
+        print(":: run splice")
+
     yield script
+
     tail.run()
 
 
