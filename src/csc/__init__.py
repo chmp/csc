@@ -90,6 +90,7 @@ import os
 import pathlib
 import re
 import sys
+import textwrap
 from types import ModuleType
 
 from typing import Iterator, List, Optional, Sequence, TextIO, Tuple, Union, cast, Set
@@ -111,7 +112,7 @@ class ScriptBase:
         cells = self.cells()
 
         if self.verbose:
-            print(":: run ", *(cell.name for cell in cells))
+            print(":: run ", *(repr(cell.name) for cell in cells))
 
         for cell in cells:
             cell.run(self.ns, self.env)
@@ -207,8 +208,9 @@ class Script(ScriptBase):
         args: Optional[Sequence[str]] = None,
         cwd: Optional[Union[str, os.PathLike]] = None,
         verbose: bool = True,
+        auto_dedent: bool = False,
     ):
-        script_file = ScriptFile(path, cell_marker)
+        script_file = ScriptFile(path, cell_marker, auto_dedent=auto_dedent)
 
         if args is not None:
             args = [script_file.path.name, *args]
@@ -353,12 +355,13 @@ class ScriptFile:
     cell_marker: str
     _cell_pattern: re.Pattern
 
-    def __init__(self, path: Union[pathlib.Path, str], cell_marker: str):
+    def __init__(self, path: Union[pathlib.Path, str], cell_marker: str, auto_dedent=False):
         self.path = pathlib.Path(path).resolve()
         self.cell_marker = cell_marker
+        self.auto_dedent = auto_dedent
 
         self._cell_pattern = re.compile(
-            r"^#\s*" + re.escape(cell_marker) + r"\s+(\[([\w,]+)\])?(.*)$"
+            r"^\s*#\s*" + re.escape(cell_marker) + r"\s+(\[([\w,]+)\])?(.*)$"
         )
 
     def parse(self) -> List["Cell"]:
@@ -391,11 +394,16 @@ class ScriptFile:
             nonlocal current_name, current_lines, current_start, current_tags
 
             if current_name is not None or any(line.strip() for line in current_lines):
+                source = "".join(current_lines)
+
+                if self.auto_dedent:
+                    source = textwrap.dedent(source)
+
                 yield Cell(
                     name=current_name,
                     idx=cell_idx,
                     range=(current_start, current_line_idx + 1),
-                    source="".join(current_lines),
+                    source=source,
                     tags=parse_tags(current_tags),
                 )
 
