@@ -180,6 +180,9 @@ class ScriptBase:
     def __getitem__(self, selection):
         raise NotImplementedError()
 
+    def __len__(self):
+        return len(self.cells())
+
     def __iter__(self):
         raise TypeError(
             "Scripts cannot be iterated over. Use .parse() or .names() to iterate "
@@ -401,6 +404,7 @@ class Cell:
     range: Tuple[int, int]
     source: str
     tags: Set[str]
+    nested: bool
 
     def __init__(
         self,
@@ -408,11 +412,13 @@ class Cell:
         range: Tuple[int, int],
         source: str,
         tags: Set[str],
+        nested: bool,
     ):
         self.name = name
         self.range = range
         self.source = source
         self.tags = tags
+        self.nested = nested
 
     def __repr__(self) -> str:
         source = repr(self.source)
@@ -625,6 +631,7 @@ class Parser:
                 source=_get_lines(start_line.line + 1, end_line.line),
                 name=start_line.name,
                 tags=start_line.tags,
+                nested=start_line.type is CellLineType.nested_start,
             )
 
     def _iter_cell_ranges(self, cell_lines):

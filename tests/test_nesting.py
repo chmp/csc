@@ -45,3 +45,8 @@ def test_exec(script):
 
     script["Init", "Inner"].run()
     assert script.ns.a == 1
+
+
+def test_nested_attribute(script):
+    assert script[lambda cell: cell.nested].names() == ["Inner"]
+    assert script[lambda: cell.nested].names() == ["Inner"]
