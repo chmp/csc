@@ -261,6 +261,10 @@ class Script(ScriptBase):
         return self.script_file.path
 
     @property
+    def nested(self):
+        return NestedCells(self)
+
+    @property
     def cell_marker(self):
         return self.script_file.cell_marker
 
@@ -268,10 +272,36 @@ class Script(ScriptBase):
         return ScriptSubset(self, selection)
 
     def cells(self) -> List["Cell"]:
-        return self.script_file.parse()
+        return self._cells()
+
+    def _cells(self, nested=False):
+        return [cell for cell in self.script_file.parse() if cell.nested == nested]
 
     def _ipython_key_completions_(self):
         return self.names()
+
+
+class NestedCells(ScriptBase):
+    def __init__(self, script):
+        self.script = script
+
+    @property
+    def ns(self):
+        return self.script.ns
+
+    @property
+    def env(self):
+        return self.script.env
+
+    @property
+    def verbose(self):
+        return self.script.verbose
+
+    def cells(self) -> List["Cell"]:
+        return self.script._cells(nested=True)
+
+    def __getitem__(self, selection):
+        return ScriptSubset(self, selection)
 
 
 class ScriptSubset(ScriptBase):
@@ -371,7 +401,11 @@ class _LazyeNameToIdxMapper:
 
                 self._map[cell.name] = idx
 
-        return self._map[name_or_idx]
+        try:
+            return self._map[name_or_idx]
+
+        except KeyError:
+            raise RuntimeError(f"Could not find cell {name_or_idx!r}")
 
 
 def _ensure_list(obj):
