@@ -84,6 +84,7 @@ Or with :func:`slice`::
 
 """
 import contextlib
+import enum
 import fnmatch
 import inspect
 import os
@@ -91,9 +92,23 @@ import pathlib
 import re
 import sys
 import textwrap
-from types import ModuleType
 
-from typing import Iterator, List, Optional, Sequence, TextIO, Tuple, Union, cast, Set
+from dataclasses import dataclass
+from enum import Enum
+from types import ModuleType
+from typing import (
+    cast,
+    ClassVar,
+    FrozenSet,
+    Iterator,
+    List,
+    Optional,
+    Sequence,
+    Set,
+    TextIO,
+    Tuple,
+    Union,
+)
 
 __all__ = ["Script", "export_to_notebook", "notebook_to_script", "splice"]
 
@@ -208,7 +223,7 @@ class Script(ScriptBase):
         args: Optional[Sequence[str]] = None,
         cwd: Optional[Union[str, os.PathLike]] = None,
         verbose: bool = True,
-        auto_dedent: bool = False,
+        auto_dedent: bool = True,
     ):
         script_file = ScriptFile(path, cell_marker, auto_dedent=auto_dedent)
 
@@ -301,7 +316,7 @@ def _eval_cell_predicate(predicate, cell):
 
     For details on the semantics see the documentation of :class:`Script`.
     """
-    scope = dict(cell=cell, name=cell.name, idx=cell.idx, tags=cell.tags)
+    scope = dict(cell=cell, name=cell.name, tags=cell.tags)
 
     signature = inspect.signature(predicate)
 
@@ -353,77 +368,26 @@ def _ensure_list(obj):
 class ScriptFile:
     path: pathlib.Path
     cell_marker: str
-    _cell_pattern: re.Pattern
 
-    def __init__(self, path: Union[pathlib.Path, str], cell_marker: str, auto_dedent=False):
+    def __init__(
+        self, path: Union[pathlib.Path, str], cell_marker: str, auto_dedent=True
+    ):
         self.path = pathlib.Path(path).resolve()
         self.cell_marker = cell_marker
         self.auto_dedent = auto_dedent
-
-        self._cell_pattern = re.compile(
-            r"^\s*#\s*" + re.escape(cell_marker) + r"\s+(\[([\w,]+)\])?(.*)$"
-        )
 
     def parse(self) -> List["Cell"]:
         with self.path.open("rt") as fobj:
             return self._parse(fobj)
 
     def _parse(self, fobj: TextIO) -> List["Cell"]:
-        current_name: Optional[str] = None
-        current_tags: Optional[Set[str]] = None
-        current_lines: List[str] = []
-        current_start: int = 0
-
-        def parse(fobj):
-            cells: List[Cell] = []
-            idx = 0
-
-            for idx, line in enumerate(fobj):
-                m = self._cell_pattern.match(line)
-                if m is not None:
-                    cells += emit(len(cells), idx, m.group(3).strip(), m.group(2))
-
-                else:
-                    current_lines.append(line)
-
-            cells += emit(len(cells), idx, None, None)
-
-            return cells
-
-        def emit(cell_idx, current_line_idx, next_cell_name, next_tags):
-            nonlocal current_name, current_lines, current_start, current_tags
-
-            if current_name is not None or any(line.strip() for line in current_lines):
-                source = "".join(current_lines)
-
-                if self.auto_dedent:
-                    source = textwrap.dedent(source)
-
-                yield Cell(
-                    name=current_name,
-                    idx=cell_idx,
-                    range=(current_start, current_line_idx + 1),
-                    source=source,
-                    tags=parse_tags(current_tags),
-                )
-
-            current_start = current_line_idx + 1
-            current_name = next_cell_name
-            current_tags = next_tags
-            current_lines = []
-
-        def parse_tags(tags):
-            if tags is None:
-                return set()
-
-            return {tag.strip() for tag in tags.split(",") if tag.strip()}
-
-        return parse(fobj)
+        return Parser(
+            cell_marker=self.cell_marker, auto_dendent=self.auto_dedent
+        ).parse(fobj)
 
 
 class Cell:
     name: Optional[str]
-    idx: int
     range: Tuple[int, int]
     source: str
     tags: Set[str]
@@ -431,13 +395,11 @@ class Cell:
     def __init__(
         self,
         name: Optional[str],
-        idx: int,
         range: Tuple[int, int],
         source: str,
         tags: Set[str],
     ):
         self.name = name
-        self.idx = idx
         self.range = range
         self.source = source
         self.tags = tags
@@ -613,3 +575,148 @@ class Env:
 
         finally:
             os.chdir(prev_cwd)
+
+
+class Parser:
+    def __init__(self, cell_marker="%%", auto_dendent=True):
+        self.cell_marker = cell_marker
+        self.auto_dendent = auto_dendent
+
+    def parse(self, lines):
+        lines = list(lines)
+        cell_lines = self._determine_cell_lines(lines)
+        cells = list(self._find_cells(cell_lines, lines))
+        cells = sorted(cells, key=lambda cell: cell.range[0])
+
+        return cells
+
+    def _determine_cell_lines(self, lines):
+        return list(self._iter_determine_cell_lines(lines))
+
+    def _iter_determine_cell_lines(self, lines):
+        for line_idx, line in enumerate(lines):
+            cell_line = CellLine.from_line(line_idx, line, self.cell_marker)
+            if cell_line is not None:
+                yield cell_line
+
+        yield CellLine(type=CellLineType.end, line=len(lines), name="", tags=set())
+
+    def _find_cells(self, cell_lines, lines):
+        return list(self._iter_find_cells(cell_lines, lines))
+
+    def _iter_find_cells(self, cell_lines, lines):
+        def _get_lines(start, end):
+            source = "\n".join(lines[idx] for idx in range(start, end))
+            return textwrap.dedent(source) if self.auto_dendent else source
+
+        for start_line, end_line in self._iter_cell_ranges(cell_lines):
+            yield Cell(
+                range=(start_line.line + 1, end_line.line),
+                source=_get_lines(start_line.line + 1, end_line.line),
+                name=start_line.name,
+                tags=start_line.tags,
+            )
+
+    def _iter_cell_ranges(self, cell_lines):
+        for idx in range(len(cell_lines)):
+            if cell_lines[idx].type is CellLineType.cell:
+                end_idx = min(
+                    (
+                        i
+                        for i in range(idx + 1, len(cell_lines))
+                        if cell_lines[i].type is CellLineType.cell
+                    ),
+                    default=len(cell_lines) - 1,
+                )
+                assert cell_lines[end_idx].type in {CellLineType.cell, CellLineType.end}
+
+                yield cell_lines[idx], cell_lines[end_idx]
+
+            elif cell_lines[idx].type is CellLineType.nested_start:
+                # TODO: add proper error messages
+                assert (
+                    cell_lines[idx + 1].type is CellLineType.nested_end
+                    and cell_lines[idx + 1].name == cell_lines[idx].name
+                )
+
+                yield cell_lines[idx], cell_lines[idx + 1]
+
+    def _parse_cell_start(self, line):
+        m = self._cell_pattern.match(line.strip())
+        if m is None:
+            return None
+
+        return self._parse_name(m.group("name")), self._parse_tags(m.group("tags"))
+
+    @staticmethod
+    def _parse_name(name):
+        return name.strip()
+
+    @staticmethod
+    def _parse_tags(tags):
+        if tags is None:
+            return set()
+
+        return {tag.strip() for tag in tags.split(",") if tag.strip()}
+
+
+class CellLineType(int, Enum):
+    cell = enum.auto()
+    nested_start = enum.auto()
+    nested_end = enum.auto()
+    end = enum.auto()
+
+
+@dataclass
+class CellLine:
+    type: CellLineType
+    line: int
+    name: str
+    tags: FrozenSet[str]
+
+    _pattern_cache: ClassVar[dict] = {}
+
+    @classmethod
+    def from_line(cls, idx, line, cell_marker="%%"):
+        pat = cls._compile_pattern(cell_marker)
+        m = pat.match(line.strip())
+        if m is None:
+            return None
+
+        type, name = cls._parse_name(m.group("name"))
+        tags = cls._parse_tags(m.group("tags"))
+
+        return CellLine(type=type, line=idx, name=name, tags=tags)
+
+    @classmethod
+    def _compile_pattern(cls, cell_marker):
+        if cell_marker not in cls._pattern_cache:
+            cls._pattern_cache[cell_marker] = re.compile(
+                r"^#\s*"
+                + re.escape(cell_marker)
+                + r"\s+(?:\[(?P<tags>[\w,]+)\])?(?P<name>.*)$"
+            )
+
+        return cls._pattern_cache[cell_marker]
+
+    @staticmethod
+    def _parse_name(name):
+        name = name.strip()
+
+        if name.startswith("</"):
+            assert name.endswith(">")
+            return CellLineType.nested_end, name[2:-1].strip()
+
+        elif name.startswith("<"):
+            assert name.endswith(">")
+            return CellLineType.nested_start, name[1:-1].strip()
+
+        else:
+            return CellLineType.cell, name
+
+    @staticmethod
+    def _parse_tags(tags):
+        if tags is None:
+            return set()
+
+        return frozenset(tag.strip() for tag in tags.split(",") if tag.strip())

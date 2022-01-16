@@ -44,7 +44,7 @@ def test_repr_works(script):
 
 
 def test_names(script):
-    assert script.names() == [None, "First", "Second", "Third"]
+    assert script.names() == ["First", "Second", "Third"]
 
 
 def test_cells(script):
