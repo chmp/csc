@@ -137,11 +137,21 @@ class ScriptBase:
         return eval(expr, vars(ns), vars(ns))
 
     def dir(self, pattern=None):
+        """List all variables inside the scripts namespace
+
+        :param pattern:
+            a shell pattern used to filter the variables, e.g.,
+            ``script.dir("*_schedule")``
+        """
         names = sorted(vars(self.ns))
         if pattern is not None:
             names = [name for name in names if fnmatch.fnmatch(name, pattern)]
 
         return names
+
+    def source(self):
+        """Concatenate the source of all cells"""
+        return "\n".join(cell.source for cell in self.cells())
 
     def names(self) -> List[Union[None, str]]:
         """Return the names of the cells"""
@@ -304,19 +314,19 @@ def _normalize_selection(cells, selection):
             yield from (
                 idx
                 for idx, cell in enumerate(cells)
-                if _eval_cell_predicate(item, cell)
+                if _eval_cell_predicate(item, idx, cell)
             )
 
         else:
             raise ValueError(f"Invalid selector {item}")
 
 
-def _eval_cell_predicate(predicate, cell):
+def _eval_cell_predicate(predicate, idx, cell):
     """Evaluate a cell predicate
 
     For details on the semantics see the documentation of :class:`Script`.
     """
-    scope = dict(cell=cell, name=cell.name, tags=cell.tags)
+    scope = dict(cell=cell, name=cell.name, tags=cell.tags, idx=idx)
 
     signature = inspect.signature(predicate)
 
