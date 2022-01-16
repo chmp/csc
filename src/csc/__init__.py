@@ -97,6 +97,8 @@ from dataclasses import dataclass
 from enum import Enum
 from types import ModuleType
 from typing import (
+    Any,
+    Iterable,
     cast,
     ClassVar,
     FrozenSet,
@@ -190,16 +192,24 @@ class ScriptBase:
         )
 
     def __repr__(self) -> str:
-        self_type = type(self).__name__
+        content = " ".join(
+            f"{v}" if k is None else f"{k}: {v}" for k, v in self._repr_parts_()
+        )
+        return "<" + content + ">"
+
+    def _repr_parts_(self) -> Iterable[Tuple[Optional[str], Any]]:
+        yield None, type(self).__name__
+
         try:
-            cells = self.cells()
+            names = self.names()
+            tags = self.tags
 
         except Exception as e:
-            return f"<{self_type} invalid {e!r}>"
+            yield None, f"invalid {e!r}"
 
-        cell_names = [cell.name for cell in cells]
-        cell_tags = sorted({tag for cell in cells for tag in cell.tags})
-        return f"<{self_type} cells: {cell_names} tags: {cell_tags}>"
+        else:
+            yield "cells", names
+            yield "tags", sorted(tags)
 
     @property
     def tags(self):
@@ -279,6 +289,10 @@ class Script(ScriptBase):
 
     def _ipython_key_completions_(self):
         return self.names()
+
+    def _repr_parts_(self) -> Iterable[Tuple[Optional[str], Any]]:
+        yield from super()._repr_parts_()
+        yield "nested", self.nested.names()
 
 
 class NestedCells(ScriptBase):

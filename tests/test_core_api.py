@@ -42,6 +42,18 @@ def test_repr_works(script):
     assert "Third" in repr(script["Third"])
     assert "First" not in repr(script["Third"])
 
+    assert "cells:" in repr(script)
+    assert "tags:" in repr(script)
+    assert "nested:" in repr(script)
+
+    assert "cells:" in repr(script["Third"])
+    assert "tags:" in repr(script["Third"])
+    assert "nested:" not in repr(script["Third"])
+
+    assert "cells:" in repr(script.nested)
+    assert "tags:" in repr(script.nested)
+    assert "nested:" not in repr(script.nested)
+
 
 def test_names(script):
     assert script.names() == ["First", "Second", "Third"]
