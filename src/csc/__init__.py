@@ -670,7 +670,7 @@ class Parser:
 
     def _iter_find_cells(self, cell_lines, lines):
         def _get_lines(start, end):
-            source = "\n".join(lines[idx] for idx in range(start, end))
+            source = "\n".join(lines[idx].rstrip() for idx in range(start, end))
             return textwrap.dedent(source) if self.auto_dendent else source
 
         for start_line, end_line in self._iter_cell_ranges(cell_lines):
