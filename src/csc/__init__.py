@@ -112,7 +112,10 @@ from typing import (
     Union,
 )
 
-__all__ = ["Script", "export_to_notebook", "notebook_to_script", "splice"]
+__all__ = ["Script", "export_to_notebook", "notebook_to_script", "splice", "load"]
+
+
+DEFAULT_CELL_MARKER: str = "%%"
 
 
 class ScriptBase:
@@ -179,6 +182,15 @@ class ScriptBase:
     def spliced(self, split_point, inclusive=True):
         return splice(self, split_point, inclusive=inclusive)
 
+    def load(self):
+        """Run the current selection and return the namespace"""
+        self.run()
+        return self.ns
+
+    def get(self, *cells):
+        """An alias for __getitem__ to fit into method chains"""
+        return self[cells]
+
     def __getitem__(self, selection):
         raise NotImplementedError()
 
@@ -242,7 +254,7 @@ class Script(ScriptBase):
     def __init__(
         self,
         path: Union[pathlib.Path, str],
-        cell_marker: str = "%%",
+        cell_marker: str = DEFAULT_CELL_MARKER,
         args: Optional[Sequence[str]] = None,
         cwd: Optional[Union[str, os.PathLike]] = None,
         verbose: bool = True,
@@ -585,6 +597,19 @@ def splice(script, split_point, inclusive=True) -> Iterator["ScriptBase"]:
     tail.run()
 
 
+def load(script_path, select=None, cell_marker=DEFAULT_CELL_MARKER):
+    """A shortcut for ``Script(script_path)[select].load()``"""
+    script = Script(script_path, cell_marker=cell_marker)
+    if select is not None:
+        if isinstance(select, (tuple, list)):
+            script = script.get(*select)
+
+        else:
+            script = script.get(select)
+
+    return script.load()
+
+
 @contextlib.contextmanager
 def _as_fobj(
     path_or_fobj: Union[str, os.PathLike, TextIO],
@@ -658,6 +683,8 @@ class Parser:
         return list(self._iter_determine_cell_lines(lines))
 
     def _iter_determine_cell_lines(self, lines):
+        yield CellLine(CellLineType.script_start, 0, None, frozenset())
+
         for line_idx, line in enumerate(lines):
             cell_line = CellLine.from_line(line_idx, line, self.cell_marker)
             if cell_line is not None:
@@ -684,7 +711,7 @@ class Parser:
 
     def _iter_cell_ranges(self, cell_lines):
         for idx in range(len(cell_lines)):
-            if cell_lines[idx].type is CellLineType.cell:
+            if cell_lines[idx].type in {CellLineType.cell, CellLineType.script_start}:
                 end_idx = min(
                     (
                         i
@@ -695,7 +722,9 @@ class Parser:
                 )
                 assert cell_lines[end_idx].type in {CellLineType.cell, CellLineType.end}
 
-                yield cell_lines[idx], cell_lines[end_idx]
+                # skip empty cells
+                if cell_lines[idx].line != cell_lines[end_idx].line:
+                    yield cell_lines[idx], cell_lines[end_idx]
 
             elif cell_lines[idx].type is CellLineType.nested_start:
                 # TODO: add proper error messages
@@ -726,6 +755,7 @@ class Parser:
 
 
 class CellLineType(int, Enum):
+    script_start = enum.auto()
     cell = enum.auto()
     nested_start = enum.auto()
     nested_end = enum.auto()
@@ -736,7 +766,7 @@ class CellLineType(int, Enum):
 class CellLine:
     type: CellLineType
     line: int
-    name: str
+    name: Optional[str]
     tags: FrozenSet[str]
 
     _pattern_cache: ClassVar[dict] = {}
