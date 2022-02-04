@@ -8,9 +8,10 @@ from typing import (
     ClassVar,
     FrozenSet,
     Optional,
-    Set,
-    Tuple,
 )
+
+from ._base import Cell
+
 
 class Parser:
     def __init__(self, cell_marker="%%", auto_dendent=True):
@@ -161,63 +162,3 @@ class CellLine:
             return set()
 
         return frozenset(tag.strip() for tag in tags.split(",") if tag.strip())
-
-
-class Cell:
-    name: Optional[str]
-    range: Tuple[int, int]
-    source: str
-    tags: Set[str]
-    nested: bool
-
-    def __init__(
-        self,
-        name: Optional[str],
-        range: Tuple[int, int],
-        source: str,
-        tags: Set[str],
-        nested: bool,
-    ):
-        self.name = name
-        self.range = range
-        self.source = source
-        self.tags = tags
-        self.nested = nested
-
-    def __repr__(self) -> str:
-        source = repr(self.source)
-        if len(source) > 30:
-            source = source[:27] + "..."
-
-        return f"<Cell name={self.name!r} source={source}>"
-
-    def run(self, ns, env: "Env"):
-        if "markdown" in self.tags:
-            self._run_markdown(ns, env)
-
-        else:
-            self._run_code(ns, env)
-
-    def _run_code(self, ns, env: "Env"):
-        if not hasattr(ns, "__file__"):
-            raise RuntimeError("Namespace must have a valid __file__ attribute")
-
-        # include leading new-lines to ensure the line offset of the source
-        # matches the file. This is required fo inspect.getsource to work
-        # correctly, which in turn is used for example by torch.jit.script
-        source = "\n" * self.range[0] + self.source
-
-        code = compile(source, ns.__file__, "exec")
-
-        with env.patch():
-            exec(code, vars(ns), vars(ns))
-
-    def _run_markdown(self, ns, env: "Env"):
-        try:
-            from IPython.display import display_markdown
-
-        except ImportError:
-            display_markdown = lambda code, raw: print(code)
-
-        source = "\n".join(line[2:] for line in self.source.splitlines())
-        display_markdown(source, raw=True)

@@ -87,10 +87,10 @@ from ._script import Script
 from ._utils import call, export_to_notebook, notebook_to_script, splice, load
 
 __all__ = [
-    "Script", 
-    "export_to_notebook", 
-    "notebook_to_script", 
-    "splice", 
-    "load", 
+    "Script",
+    "export_to_notebook",
+    "notebook_to_script",
+    "splice",
+    "load",
     "call",
 ]

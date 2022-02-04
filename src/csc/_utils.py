@@ -10,7 +10,9 @@ from typing import (
     Union,
 )
 
+from ._base import ScriptBase
 from ._script import DEFAULT_CELL_MARKER, Script
+
 
 def export_to_notebook(script, *names):
     """Export the given variables to the ``__main__`` module.
