@@ -1,6 +1,4 @@
-# csc - execute scripts one cell at a time
-
-## Installation
+# `csc` - Tools for non standard execution in Python
 
 Install with
 
@@ -8,12 +6,32 @@ Install with
 pip install csc
 ```
 
-## Usage
+## Patterns
 
-Sometimes it may be helpful to run individual parts of a script inside an
-interactive environment, for example Jupyter Notebooks. ``csc`` is designed to
-support this use case. The basis are Python scripts with special cell
-annotations. For example consider a script to define and train a model:
+### Load a script as a module
+
+```python
+train_script = csc.load("train.py") 
+train_script.train_func()
+```
+
+### Extracting local variable from functions
+
+```python
+def add(x, y):
+    z = x + y
+    return z
+
+res = csc.call(add, 1, 2)
+assert res.__return__ == 3
+assert res.x == 1
+assert res.y == 2
+assert res.z == 3
+```
+
+### Execute scripts with code cells
+
+Consider a script to define and train a model
 
 ```python
 #%% [setup] Parameters
@@ -29,30 +47,24 @@ annotations. For example consider a script to define and train a model:
 ...
 ```
 
-Where each of the ``...`` stands for arbitrary user defined code. And the names
-inside brackets are tags. Using ``csc.Script`` this script can be executed as:
+To run the parameters cell, then overwrite the parameters, and finally run set, use:
+
 
 ```python
 script = csc.Script("external_script.py")
-script.run()
-```
-
-To modify the parameters, e.g., modify the number of hidden units, the script
-can be executed step by step. The variables defined inside the script can be
-accessed and modified using the ``ns`` attribute of the script. For example:
-
-```python
 script["Parameters"].run()
 script.ns.hidden_units = 64
 script["Setup":].run()
 ```
 
-To support this common pattern, `csc` offers the splice the function:
+### Splicing scripts
 
 ```python
 with csc.splice(script, "Parameters"):
     script.ns.hidden_units = 64
 ```
+
+### Using cell tags
 
 To only define the model without training or saving the results, a subset of the
 script can be selected via tags:
@@ -64,11 +76,13 @@ script[lambda: tags & {"setup"}].run()
 # can also be combined with splicing to modify the parameters
 with csc.splice(script[lambda: tags & {"setup"}], "Parameters"):
     script.ns.hidden_units = 64
-
-# use the model
-model = script.ns.model
 ```
 
 ## License
 
 This package is licensed under the MIT License. See `LICENSE` for details.
+
+The function `csc._utils.capture_frame` is adapted from a [stackoverflow
+post][so-post] by `Niklas R`, licensed under CC-BY-SA 4.0.
+
+[so-post]: https://stackoverflow.com/a/52358426
