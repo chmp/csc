@@ -42,6 +42,18 @@ def test_repr_works(script):
     assert "Third" in repr(script["Third"])
     assert "First" not in repr(script["Third"])
 
+    assert "cells:" in repr(script)
+    assert "tags:" in repr(script)
+    assert "nested:" in repr(script)
+
+    assert "cells:" in repr(script["Third"])
+    assert "tags:" in repr(script["Third"])
+    assert "nested:" not in repr(script["Third"])
+
+    assert "cells:" in repr(script.nested)
+    assert "tags:" in repr(script.nested)
+    assert "nested:" not in repr(script.nested)
+
 
 def test_names(script):
     assert script.names() == [None, "First", "Second", "Third"]
@@ -80,7 +92,6 @@ def test_selection_with_callable_without_params(script):
         ),
         (slice_gen["Second", "First"], 1),
         (slice_gen[["Second", "First"]], 1),
-        (slice_gen["Second", "First"], 1),
         # NOTE: str slices are inclusive
         (slice_gen["First":"Third"], 2),
         (slice_gen["First":, "First"], 1),
@@ -89,3 +100,53 @@ def test_selection_with_callable_without_params(script):
 def test_selection(script, selection, expected):
     script[selection].run()
     assert script.ns.a == expected
+
+
+@pytest.mark.parametrize(
+    "selection, expected",
+    [
+        (["First"], 1),
+        ([lambda: name == "First"], 1),
+        (["Second"], 2),
+        (["Second", "First"], 1),
+    ],
+)
+def test_selection_get(script, selection, expected):
+    script.get(*selection).run()
+    assert script.ns.a == expected
+
+
+@pytest.mark.parametrize(
+    "selection, expected",
+    [
+        (["First"], 1),
+        ([lambda: name == "First"], 1),
+        (["Second"], 2),
+        (["Second", "First"], 1),
+    ],
+)
+def test_selection_load(script, selection, expected):
+    ns = script.get(*selection).load()
+    assert ns.a == expected
+
+
+def test_load_partial(script):
+    ns = script["Second"].load()
+    assert ns.a == 2
+
+
+def test_load(tmp_path):
+    script_path = tmp_path / "example.py"
+    script_path.write_text(example_script)
+
+    ns = csc.load(script_path, select=["First"])
+    assert ns.a == 1
+
+    ns = csc.load(script_path, select=["First", "Second"])
+    assert ns.a == 2
+
+    ns = csc.load(script_path, select=["Second"])
+    assert ns.a == 2
+
+    ns = csc.load(script_path, select=["Second", "First"])
+    assert ns.a == 1
