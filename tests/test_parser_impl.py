@@ -1,6 +1,6 @@
 import pytest
 
-from csc import CellLine, CellLineType
+from csc._parser import CellLine, CellLineType
 
 
 @pytest.mark.parametrize(
