@@ -1,4 +1,4 @@
-# `csc` - Tools for non standard execution in Python
+# `csc` - Tools for non standard Python execution
 
 Install with
 
@@ -59,7 +59,10 @@ script["Setup":].run()
 
 ### Splicing scripts
 
+Same effect as in the previous example:
+
 ```python
+script = csc.Script("external_script.py")
 with csc.splice(script, "Parameters"):
     script.ns.hidden_units = 64
 ```
@@ -82,7 +85,7 @@ with csc.splice(script[lambda: tags & {"setup"}], "Parameters"):
 
 This package is licensed under the MIT License. See `LICENSE` for details.
 
-The function `csc._utils.capture_frame` is adapted from a [stackoverflow
-post][so-post] by `Niklas R`, licensed under CC-BY-SA 4.0.
+The function `csc._utils.capture_frame` is adapted from this [stackoverflow
+post][so-post] by `Niklas Rosenstein` licensed under CC-BY-SA 4.0.
 
 [so-post]: https://stackoverflow.com/a/52358426
