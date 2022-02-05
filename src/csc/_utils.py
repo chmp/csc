@@ -124,9 +124,6 @@ def capture_frame(func, /, *args, **kwargs):
     """Call a function and capture the frame
 
     This function is adapted from https://stackoverflow.com/a/52358426
-
-    Author: Niklas R
-    License: CC-BY-SA 4.0
     """
     captured_frame = None
     trace = sys.gettrace()

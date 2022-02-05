@@ -86,6 +86,7 @@ Or with :func:`slice`::
 from ._script import Script
 from ._utils import call, export_to_notebook, notebook_to_script, splice, load
 
+__version__ = "21.8.0"
 __all__ = [
     "Script",
     "export_to_notebook",

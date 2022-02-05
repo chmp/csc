@@ -1,10 +1,24 @@
 import pathlib
+import re
 from setuptools import setup, PEP420PackageFinder
 
+init_source = (
+    pathlib.Path(__file__)
+    .parent.resolve()
+    .joinpath("src", "csc", "__init__.py")
+    .read_text()
+)
+
+(version,) = [
+    m.group(1)
+    for line in init_source.splitlines()
+    for m in [re.match(r"^__version__ = \"(.*)\"$", line)]
+    if m is not None
+]
 
 setup(
     name="csc",
-    version="21.8.0",
+    version=version,
     description="Run python scripts cell by cell.",
     long_description=pathlib.Path("Readme.md").read_text(),
     long_description_content_type="text/markdown",
