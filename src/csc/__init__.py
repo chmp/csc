@@ -94,7 +94,7 @@ from ._utils import (
     load,
 )
 
-__version__ = "21.8.0"
+__version__ = "22.2.0"
 __all__ = [
     "Script",
     "export_to_notebook",
