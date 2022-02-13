@@ -1,7 +1,9 @@
 import contextlib
+import importlib
 import os
 import pathlib
 import sys
+import types
 
 from typing import (
     cast,
@@ -14,7 +16,7 @@ from ._base import ScriptBase
 from ._script import DEFAULT_CELL_MARKER, Script
 
 
-def export_to_notebook(script, *names):
+def export_to_notebook(obj, *names):
     """Export the given variables to the ``__main__`` module.
 
     In a notebook environment the ``__main__`` module is namespace in which
@@ -23,8 +25,20 @@ def export_to_notebook(script, *names):
     """
     import __main__
 
+    if isinstance(obj, ScriptBase):
+        ns = obj.ns.__dict__
+
+    elif isinstance(obj, dict):
+        ns = obj
+
+    else:
+        ns = obj.__dict__
+
+    if not names:
+        names = list(ns)
+
     for name in names:
-        setattr(__main__, name, getattr(script.ns, name))
+        setattr(__main__, name, ns[name])
 
 
 def notebook_to_script(
@@ -165,3 +179,52 @@ def _as_fobj(
     else:
         with open(path_or_fobj, mode + "t") as fobj:
             yield cast(TextIO, fobj)
+
+
+def create_module(name, source):
+    """Create a temporary module"""
+    name = name.strip()
+    assert name
+
+    _ensure_module_parents_exist(name)
+
+    mod = types.ModuleType(name)
+    exec(source, mod.__dict__, mod.__dict__)
+
+    sys.modules[name] = mod
+
+
+def _ensure_module_parents_exist(name):
+    for parent in _iter_module_parents(name):
+        try:
+            importlib.import_module(parent)
+
+        except ModuleNotFoundError:
+            pass
+
+        else:
+            continue
+
+        if not parent in sys.modules:
+            sys.modules[parent] = types.ModuleType(parent)
+
+
+def _iter_module_parents(name):
+    start = 0
+
+    while True:
+        try:
+            idx = name.index(".", start)
+
+        except ValueError:
+            break
+
+        yield name[:idx]
+        start = idx + 1
+
+
+def autoconfig():
+    """Register csc's IPython extensions"""
+    from IPython import get_ipython
+
+    get_ipython().register_magic_function(create_module, "cell", "csc.module")
