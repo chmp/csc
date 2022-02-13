@@ -81,6 +81,32 @@ with csc.splice(script[lambda: tags & {"setup"}], "Parameters"):
     script.ns.hidden_units = 64
 ```
 
+### Creating temporary modules
+
+In a Jupyter notebook, first register the magic function
+
+```python
+import csc
+csc.autoconfig()
+```
+
+Afterwards a module can be defined via
+
+```python
+%%csc.module my_cool_module
+
+def add(x, y):
+    return x + y
+```
+
+It can be used as any other module. For example:
+
+```python
+import my_cool_module
+
+assert my_cool_module.add(1, 2) == 3
+```
+
 ## License
 
 This package is licensed under the MIT License. See `LICENSE` for details.
