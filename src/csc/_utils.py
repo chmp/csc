@@ -182,7 +182,28 @@ def _as_fobj(
 
 
 def create_module(name, source):
-    """Create a temporary module"""
+    """Create a temporary module
+
+    This function is also available as a IPython magic after calling
+    `csc.autoconfig()`:
+
+    In once cell define the module via
+
+    ```python
+    %%csc.module my_cool_module
+
+    def add(x, y):
+        return x + y
+    ```
+
+    In another cell use the module via
+
+    ```python
+    import my_cool_module
+
+    assert my_cool_module.add(1, 2) == 3
+    ```
+    """
     name = name.strip()
     assert name
 
