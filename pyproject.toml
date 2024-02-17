@@ -1,0 +1,61 @@
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.poetry]
+name = "csc"
+version = "24.2.0"
+
+authors = ["Christopher Prohm <mail@cprohm.de>"]
+
+description = "Execute python scripts cell by cell  "
+readme = "Readme.md"
+license = "MIT"
+
+include = ["License.md"]
+
+classifiers = [
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+]
+
+[tool.poetry.dependencies]
+python = ">=3.8, <4"
+
+[tool.poetry.group.dev]
+optional = true
+
+[tool.poetry.group.dev.dependencies]
+ruff = "^0.2.0"
+pytest = "^8.0"
+build = "^1.0"
+poetry = "^1.7"
+poetry-plugin-export = "^1.6"
+
+[project.urls]
+repository = "https://github.com/chmp/csc"
+
+[tool.ruff.lint]
+select = [
+    "E",
+    "F",
+    "I",
+    "COM",
+    "C4",
+    "PT",
+    "Q",
+    "RET",
+    "SIM",
+    "ERA",
+    "RUF",
+]
+
+ignore = [
+    "E501", 
+    "SIM117",
+    # poetry uses a non-standard pyproject.toml format
+    "RUF200",
+    # trailing comma rule may conflict with the formatter
+    "COM812",
+]

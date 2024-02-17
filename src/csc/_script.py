@@ -1,13 +1,12 @@
+import builtins
 import re
 import sys
-
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from types import ModuleType
-from typing import Any, Union, Iterable
 from textwrap import dedent
-
+from types import ModuleType
+from typing import Any, Iterable, Union
 
 DEFAULT_CELL_MARKER = r"#:"
 VSCODE_CELL_MARKER = r"#\s*%%"
@@ -17,6 +16,11 @@ SourceLike = Union[PathLike, "FileSource", "InlineSource"]
 
 
 class Script:
+    """A Python script that can be executed cell by cell
+
+    Cells are defined via comments (per default '#: {CELL_NAME}').
+    """
+
     def __init__(
         self,
         base_script: SourceLike,
@@ -54,33 +58,42 @@ class Script:
 
     @staticmethod
     def _build_scope(source: Union["FileSource", "InlineSource"]) -> ModuleType:
-        name = source.file.stem if source.file is not None else "<unnamed>"
+        name = source._file.stem if source._file is not None else "<unnamed>"
         scope = ModuleType(name)
         scope.__name__ = name
-        scope.__file__ = str(source.file) if source.file is not None else None
+        scope.__file__ = str(source._file) if source._file is not None else None
 
         return scope
 
-    def eval(self, expr: str) -> Any:
-        return eval(expr, self.scope.__dict__, self.scope.__dict__)
+    def list(self) -> builtins.list[str]:
+        """List all cells of the script
 
-    def run(self, *cell_names: str):
+        Only cells of the base script are considered.
+        """
+        return [cell.name for cell in self._sources[0]._parse()]
+
+    def run(self, *cell_names: str) -> None:
+        """Run cells of the script"""
         for cell_name in cell_names:
-            for cell in self.get(cell_name):
+            for cell in self._get(cell_name):
                 self._run(cell)
 
-    def get(self, cell_name: str) -> tuple["Cell", ...]:
+    def eval(self, expr: str) -> Any:
+        """Evaluate an expression the scope of the script"""
+        return eval(expr, self.scope.__dict__, self.scope.__dict__)
+
+    def _get(self, cell_name: str) -> tuple["Cell", ...]:
         res: list["Cell"] = []
 
         for idx, source in enumerate(self._sources):
-            for cell in source.parse():
+            for cell in source._parse():
                 if cell.name != cell_name:
                     continue
 
                 res.append(cell)
 
             if idx == 0 and not res:
-                return tuple()
+                return ()
 
         return tuple(res)
 
@@ -99,35 +112,36 @@ class Script:
                 self.scope.__dict__,
             )
 
-    def list(self):
-        return [cell.name for cell in self._sources[0].parse()]
-
 
 class InlineSource:
+    """Define a script via its source"""
+
     _text: str
     _cell_marker: str
-    file: Path | None
+    _file: Path | None
 
     def __init__(self, text: str, *, cell_marker: str):
         self._text = text
         self._cell_marker = cell_marker
-        self.file = None
+        self._file = None
 
-    def parse(self) -> list["Cell"]:
+    def _parse(self) -> list["Cell"]:
         return parse_script(self._text, cell_marker=self._cell_marker, file=None)
 
 
 class FileSource:
+    """Define a script via a file"""
+
     _path: Path
     _cell_marker: str
-    file: Path | None
+    _file: Path | None
 
     def __init__(self, path: Path, *, cell_marker: str):
         self._path = path
         self._cell_marker = cell_marker
-        self.file = path
+        self._file = path
 
-    def parse(self) -> list["Cell"]:
+    def _parse(self) -> list["Cell"]:
         return parse_script(
             self._path.read_text(), cell_marker=self._cell_marker, file=self._path
         )

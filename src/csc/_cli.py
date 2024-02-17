@@ -1,13 +1,11 @@
-import ast
 import argparse
+import ast
 import warnings
-
-from pathlib import Path
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Sequence
 
-from ._script import FileSource, InlineSource, DEFAULT_CELL_MARKER, Script
-
+from ._script import DEFAULT_CELL_MARKER, FileSource, InlineSource, Script
 
 _parser = argparse.ArgumentParser("csc")
 _parser.add_argument(
