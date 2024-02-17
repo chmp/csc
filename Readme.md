@@ -6,112 +6,59 @@ Install with
 pip install csc
 ```
 
-## Patterns
-
-### Load a script as a module
-
-```python
-train_script = csc.load("train.py") 
-train_script.train_func()
-```
-
-### Extracting local variable from functions
-
-```python
-def add(x, y):
-    z = x + y
-    return z
-
-res = csc.call(add, 1, 2)
-assert res.__return__ == 3
-assert res.x == 1
-assert res.y == 2
-assert res.z == 3
-```
-
-### Execute scripts with code cells
+## Example
 
 Consider a script to define and train a model
 
 ```python
-#%% [setup] Parameters
+#: parameters
 ...
 
-#%% [setup] Setup
+#: setup
 ...
 
-#%% Train
+#: train
 ...
 
-#%% Save
+#: save
 ...
 ```
 
-To run the parameters cell, then overwrite the parameters, and finally run set, use:
+To run the the script cell by cell, use:
 
 
 ```python
-script = csc.Script("external_script.py")
-script["Parameters"].run()
-script.ns.hidden_units = 64
-script["Setup":].run()
+script = csc.Script("experiment.py")
+script.run("parameters")
+script.run("setup")
+script.run("train")
+script.run("save")
 ```
 
-### Splicing scripts
+## Splicing scripts
 
-Same effect as in the previous example:
+Different scripts can be "spliced" together by specifying multiple scripts. The
+first script acts as the base script and defines the available cells. Subsequent
+scripts, spliced scripts, can extend the cells of the base script. All scripts
+share a single scope and cells are executed after each other. For each cell,
+first the cell of the base script is executed and then any cells of the same
+name defined in spliced scripts.
+
 
 ```python
-script = csc.Script("external_script.py")
-with csc.splice(script, "Parameters"):
-    script.ns.hidden_units = 64
+# file: parameters.py
+#: parameters
+batch_size = ...
 ```
 
-### Using cell tags
-
-To only define the model without training or saving the results, a subset of the
-script can be selected via tags:
-
 ```python
-# execute any cell tagged with "setup"
-script[lambda: tags & {"setup"}].run()
+scripts = csc.Script(["experiment.py", "parameters.py"])
 
-# can also be combined with splicing to modify the parameters
-with csc.splice(script[lambda: tags & {"setup"}], "Parameters"):
-    script.ns.hidden_units = 64
-```
-
-### Creating temporary modules
-
-In a Jupyter notebook, first register the magic function
-
-```python
-import csc
-csc.autoconfig()
-```
-
-Afterwards a module can be defined via
-
-```python
-%%csc.module my_cool_module
-
-def add(x, y):
-    return x + y
-```
-
-It can be used as any other module. For example:
-
-```python
-import my_cool_module
-
-assert my_cool_module.add(1, 2) == 3
+# executes first the 'parameters' cell of 'experiment.py', then the 
+# 'parameters' cell of 'parameters.py'
+scripts.run("parameters")
 ```
 
 ## License
 
 This package is licensed under the MIT License. See `LICENSE` for details.
-
-The function `csc._utils.capture_frame` is adapted from this [stackoverflow
-post][so-post] by `Niklas Rosenstein` licensed under CC-BY-SA 4.0.
-
-[so-post]: https://stackoverflow.com/a/52358426
