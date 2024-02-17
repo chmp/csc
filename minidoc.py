@@ -15,7 +15,7 @@ To use `minidoc`, follow these steps:
 
 `minidoc` will replace the content between the comments with the documentation
 of the module. It preserves the comments itself. Therefore, it is safe to run
-`minidoc` repeatedly on the same document. 
+`minidoc` repeatedly on the same document.
 
 Per default minidoc will render a header for the module. To disable this
 behavior add `"header": false` to the initial comment, as in:
@@ -523,6 +523,9 @@ def format_annotation(obj: Any) -> str:
     if isinstance(obj, typing.TypeVar):
         return str(obj)
 
+    if isinstance(obj, typing.ForwardRef):
+        return obj.__forward_arg__
+
     if isinstance(obj, collections.abc.Hashable) and obj in _known_objects:
         return _known_objects[obj]
 
@@ -548,9 +551,9 @@ _known_typing_origins = {
     collections.abc.Mapping: "Mapping",
     collections.abc.Sequence: "Sequence",
     typing.Union: "Union",
-    tuple: "Tuple",
-    list: "List",
-    dict: "Dict",
+    tuple: "tuple",
+    list: "list",
+    dict: "dict",
 }
 
 _known_objects = {

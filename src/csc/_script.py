@@ -73,7 +73,7 @@ class Script:
         return [cell.name for cell in self._sources[0]._parse()]
 
     def run(self, *cell_names: str) -> None:
-        """Run cells of the script"""
+        """Run cells of the script by name"""
         for cell_name in cell_names:
             for cell in self._get(cell_name):
                 self._run(cell)

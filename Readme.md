@@ -85,15 +85,15 @@ learning_rate=3e-4
 ## API Reference
 
 <!-- minidoc "function": "csc.Script", "header_depth": 3 -->
-### `csc.Script(base_script: Union[str, pathlib.Path, ForwardRef('FileSource'), ForwardRef('InlineSource')], /, *spliced_scripts, cell_marker: str = '#:', register: bool = False)`
+### `csc.Script(base_script: Union[str, pathlib.Path, FileSource, InlineSource], /, *spliced_scripts, cell_marker: str = '#:', register: bool = False)`
 
-[csc.Script]: #cscscriptbase_script-unionstr-pathlibpath-forwardreffilesource-forwardrefinlinesource-/-spliced_scripts-cell_marker-str--#-register-bool--false
+[csc.Script]: #cscscriptbase_script-unionstr-pathlibpath-filesource-inlinesource-/-spliced_scripts-cell_marker-str--#-register-bool--false
 
 A Python script that can be executed cell by cell
 
 Cells are defined via comments (per default '#: {CELL_NAME}').
 
-#### `csc.Script.list(self) -> List[str]`
+#### `csc.Script.list(self) -> list[str]`
 
 [csc.Script.list]: #cscscriptlistself---liststr
 
@@ -105,7 +105,7 @@ Only cells of the base script are considered.
 
 [csc.Script.run]: #cscscriptrunself-cell_names---none
 
-Run cells of the script
+Run cells of the script by name
 
 #### `csc.Script.eval(self, expr: str) -> Any`
 
