@@ -1,168 +1,247 @@
-import os
-import pathlib
+import re
+import sys
 
+from contextlib import contextmanager
 from dataclasses import dataclass
+from pathlib import Path
 from types import ModuleType
-from typing import (
-    Any,
-    Iterable,
-    List,
-    Optional,
-    Sequence,
-    TextIO,
-    Tuple,
-    Union,
-)
-
-from ._base import ScriptBase, Env, Cell, _normalize_selection
-from ._parser import Parser
-
-DEFAULT_CELL_MARKER: str = "%%"
+from typing import Any, Union, Iterable
+from textwrap import dedent
 
 
-class Script(ScriptBase):
-    """A script with cells defined by comments
+DEFAULT_CELL_MARKER = r"#:"
+VSCODE_CELL_MARKER = r"#\s*%%"
 
-    :param path:
-        The path of the script, can be a string or a :class:`pathlib.Path`.
-    :param cell_marker:
-        The cell marker used. Cells are defined as ``# {CELL_MARKER} {NAME}``,
-        with an arbitrary number of spaces allowed.
-    :param args:
-        If not ``None``, the command line arguments of the script. While a cell
-        is executed, ``sys.argv`` is set to ``[script_name, *args]``.
-    :param cwd:
-        If not ``None``, change the working directory to it during the script
-        execution.
+PathLike = Union[str, Path]
 
-    .. warning::
 
-        Execution of scripts is non threadsafe when the execution environment
-        is modified via ``args`` or ``cwd`` as it changes the global Python
-        interpreter state.
-
-    """
-
+class Script:
     def __init__(
         self,
-        path: Union[pathlib.Path, str],
+        source: PathLike | Iterable[PathLike | "FileSource" | "InlineSource"],
+        *,
         cell_marker: str = DEFAULT_CELL_MARKER,
-        args: Optional[Sequence[str]] = None,
-        cwd: Optional[Union[str, os.PathLike]] = None,
-        verbose: bool = True,
-        auto_dedent: bool = True,
+        register: bool = False,
     ):
-        script_file = ScriptFile(path, cell_marker, auto_dedent=auto_dedent)
+        self._sources = self._ensure_sources(source, cell_marker=cell_marker)
+        self.scope = self._build_scope(self._sources[0])
+        self.register = register
 
-        if args is not None:
-            args = [script_file.path.name, *args]
+    @staticmethod
+    def _ensure_sources(
+        source: PathLike | Iterable[Union[PathLike, "FileSource", "InlineSource"]],
+        cell_marker: str,
+    ) -> list[Union["FileSource", "InlineSource"]]:
+        if isinstance(source, (str, Path)):
+            return [FileSource(path=Path(source), cell_marker=cell_marker)]
 
-        if cwd is not None:
-            cwd = pathlib.Path(cwd)
+        res: list["FileSource" | "InlineSource"] = []
+        for item in source:
+            if isinstance(item, (str, Path)):
+                res.append(FileSource(path=Path(item), cell_marker=cell_marker))
 
-        env = Env(args=args, cwd=cwd)
+            elif isinstance(item, (InlineSource, FileSource)):
+                res.append(item)
 
-        self.script_file = script_file
-        self.env = env
-        self.verbose = verbose
+            else:
+                raise RuntimeError(f"Invalid source {item}")
 
-        self.ns = ModuleType(script_file.path.stem)
-        self.ns.__file__ = str(script_file.path)
-        self.ns.__csc__ = True  # type: ignore
+        if not res:
+            raise RuntimeError("Need at least one source")
+
+        return res
+
+    @staticmethod
+    def _build_scope(source: Union["FileSource", "InlineSource"]) -> ModuleType:
+        name = source.file.stem if source.file is not None else "<unnamed>"
+        scope = ModuleType(name)
+        scope.__name__ = name
+        scope.__file__ = str(source.file) if source.file is not None else None
+
+        return scope
+
+    def eval(self, expr: str) -> Any:
+        return eval(expr, self.scope.__dict__, self.scope.__dict__)
+
+    def run(self, *cell_names: str):
+        for cell_name in cell_names:
+            for cell in self.get(cell_name):
+                self._run(cell)
+
+    def get(self, cell_name: str) -> tuple["Cell", ...]:
+        res: list["Cell"] = []
+
+        for idx, source in enumerate(self._sources):
+            for cell in source.parse():
+                if cell.name != cell_name:
+                    continue
+
+                res.append(cell)
+
+            if idx == 0 and not res:
+                return tuple()
+
+        return tuple(res)
+
+    def _run(self, cell: "Cell"):
+        print(cell.source[:100])
+        # NOTE: use compile -> exec to allow specifying the source path
+        code = compile(
+            dedent(cell.source_with_offset),
+            cell.file if cell.file is not None else "<unnamed>",
+            mode="exec",
+        )
+        with register_module(self.register, self.scope):
+            exec(
+                code,
+                self.scope.__dict__,
+                self.scope.__dict__,
+            )
+
+    def list(self):
+        return [cell.name for cell in self._sources[0].parse()]
+
+
+class InlineSource:
+    _text: str
+    _cell_marker: str
+    file: Path | None
+
+    def __init__(self, text: str, *, cell_marker: str):
+        self._text = text
+        self._cell_marker = cell_marker
+        self.file = None
+
+    def parse(self) -> list["Cell"]:
+        return parse_script(self._text, cell_marker=self._cell_marker, file=None)
+
+
+class FileSource:
+    _path: Path
+    _cell_marker: str
+    file: Path | None
+
+    def __init__(self, path: Path, *, cell_marker: str):
+        self._path = path
+        self._cell_marker = cell_marker
+        self.file = path
+
+    def parse(self) -> list["Cell"]:
+        return parse_script(
+            self._path.read_text(), cell_marker=self._cell_marker, file=self._path
+        )
+
+
+@contextmanager
+def register_module(active: bool, module: ModuleType):
+    if not active:
+        yield
+
+    else:
+        if module.__name__ in sys.modules:
+            raise ValueError("cannot overwrite existing module")
+
+        sys.modules[module.__name__] = module
+        try:
+            yield
+
+        finally:
+            del sys.modules[module.__name__]
+
+
+@dataclass
+class Cell:
+    name: str
+    """The name of the cell"""
+    file: Path | None
+    """The file from which this cell was parsed"""
+    offset: int
+    """The offset of this cell in the script file"""
+    source: str
+    """The raw source code of the cell without additional buffers"""
 
     @property
-    def path(self):
-        return self.script_file.path
+    def source_with_offset(self):
+        """The source with additional empty lines.
 
-    @property
-    def nested(self):
-        return NestedCells(self)
-
-    @property
-    def cell_marker(self):
-        return self.script_file.cell_marker
-
-    def __getitem__(self, selection):
-        return ScriptSubset(self, selection)
-
-    def cells(self) -> List["Cell"]:
-        return self._cells()
-
-    def _cells(self, nested=False):
-        return [cell for cell in self.script_file.parse() if cell.nested == nested]
-
-    def _ipython_key_completions_(self):
-        return self.names()
-
-    def _repr_parts_(self) -> Iterable[Tuple[Optional[str], Any]]:
-        yield from super()._repr_parts_()
-        yield "nested", self.nested.names()
+        The source is prefixed with enough empty lines that the line numbers are
+        the same as those in the full script"""
+        return "\n" * self.offset + self.source
 
 
-class NestedCells(ScriptBase):
-    def __init__(self, script):
-        self.script = script
+def parse_script(
+    script_source,
+    *,
+    cell_marker=DEFAULT_CELL_MARKER,
+    file: Path | None = None,
+) -> list[Cell]:
+    def _finalize_head():
+        head_name, head_offset, head_fragments = cell_stack.pop()
+        cells.append(
+            Cell(
+                name=head_name,
+                file=file,
+                offset=head_offset,
+                source="\n".join(head_fragments),
+            )
+        )
 
-    @property
-    def ns(self):
-        return self.script.ns
+    def _ensure_no_nesting():
+        if len(cell_stack) > 1:
+            raise ValueError(
+                "Unclosed nested cells: "
+                f"{[cell_name for cell_name, _, _ in cell_stack[1:]]}"
+            )
 
-    @property
-    def env(self):
-        return self.script.env
+    def _append_all(cell_source):
+        for _, _, fragments in cell_stack:
+            fragments.append(cell_source)
 
-    @property
-    def verbose(self):
-        return self.script.verbose
+    cell_stack: list[tuple[str, int, list[str]]] = []
+    cells: list[Cell] = []
 
-    def cells(self) -> List["Cell"]:
-        return self.script._cells(nested=True)
+    for name, offset, source in split_script(script_source, cell_marker=cell_marker):
+        if name.startswith("+"):
+            cell_stack.append((name[1:], offset, []))
+            _append_all(source)
 
-    def __getitem__(self, selection):
-        return ScriptSubset(self, selection)
+        elif name.startswith("-"):
+            if cell_stack[-1][0] != name[1:]:
+                raise ValueError(
+                    f"Invalid close tag: expected {cell_stack[-1][0]!r}, "
+                    f"found {name!r}"
+                )
 
+            _finalize_head()
+            _append_all(source)
 
-class ScriptSubset(ScriptBase):
-    def __init__(self, script, selection):
-        self.script = script
-        self.selection = selection
+        else:
+            _ensure_no_nesting()
+            if cell_stack:
+                _finalize_head()
 
-    @property
-    def ns(self):
-        return self.script.ns
+            cell_stack.append((name, offset, [source]))
 
-    @property
-    def env(self):
-        return self.script.env
+    _ensure_no_nesting()
 
-    @property
-    def verbose(self):
-        return self.script.verbose
+    if cell_stack:
+        _finalize_head()
 
-    def cells(self) -> List["Cell"]:
-        cells = self.script.cells()
-        return [cells[idx] for idx in _normalize_selection(cells, self.selection)]
-
-    def __getitem__(self, selection):
-        return ScriptSubset(self, selection)
+    return cells
 
 
-class ScriptFile:
-    path: pathlib.Path
-    cell_marker: str
+def split_script(
+    source, *, cell_marker=DEFAULT_CELL_MARKER
+) -> list[tuple[str, int, str]]:
+    pattern = r"^\s*" + cell_marker + r"(.*)$"
+    cells: list[tuple[str, int, list[str]]] = [("", 0, [])]
 
-    def __init__(
-        self, path: Union[pathlib.Path, str], cell_marker: str, auto_dedent=True
-    ):
-        self.path = pathlib.Path(path).resolve()
-        self.cell_marker = cell_marker
-        self.auto_dedent = auto_dedent
+    for idx, line in enumerate(source.splitlines()):
+        if (m := re.match(pattern, line)) is not None:
+            name = m.group(1).strip()
+            cells.append((name, idx, [line]))
 
-    def parse(self) -> List["Cell"]:
-        with self.path.open("rt") as fobj:
-            return self._parse(fobj)
+        else:
+            cells[-1][2].append(line)
 
-    def _parse(self, fobj: TextIO) -> List["Cell"]:
-        return Parser(
-            cell_marker=self.cell_marker, auto_dendent=self.auto_dedent
-        ).parse(fobj)
+    return [(name, offset, "\n".join(lines)) for name, offset, lines in cells]
