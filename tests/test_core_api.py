@@ -85,9 +85,7 @@ def test_selection_with_callable_without_params(script):
         (slice_gen["First"], 1),
         (slice_gen["Second"], 2),
         (
-            slice_gen[
-                "First",
-            ],
+            slice_gen["First",],
             1,
         ),
         (slice_gen["Second", "First"], 1),

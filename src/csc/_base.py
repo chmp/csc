@@ -8,6 +8,7 @@ import sys
 from types import ModuleType
 from typing import (
     Any,
+    Callable,
     Iterable,
     List,
     Optional,
@@ -222,8 +223,11 @@ class Cell:
             exec(code, vars(ns), vars(ns))
 
     def _run_markdown(self, ns, env: "Env"):
+        display_markdown: Callable[[str, bool], Any]
         try:
-            from IPython.display import display_markdown
+            from IPython.display import display_markdown as ipython_display_markdown
+
+            display_markdown = ipython_display_markdown
 
         except ImportError:
             display_markdown = lambda code, raw: print(code)
