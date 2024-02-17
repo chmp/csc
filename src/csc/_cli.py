@@ -61,7 +61,8 @@ def build_script(args: Arguments) -> Script:
     if args.parameters:
         sources.append(build_parameter_source(args.parameters))
 
-    script = Script(sources, register=args.register, cell_marker=args.cell_marker)
+    assert sources, "need at least a single source"
+    script = Script(*sources, register=args.register, cell_marker=args.cell_marker)
 
     if args.parameters and "parameters" not in script.list():
         warnings.warn(

@@ -13,28 +13,29 @@ DEFAULT_CELL_MARKER = r"#:"
 VSCODE_CELL_MARKER = r"#\s*%%"
 
 PathLike = Union[str, Path]
+SourceLike = Union[PathLike, "FileSource", "InlineSource"]
 
 
 class Script:
     def __init__(
         self,
-        source: PathLike | Iterable[PathLike | "FileSource" | "InlineSource"],
-        *,
+        base_script: SourceLike,
+        /,
+        *spliced_scripts: SourceLike,
         cell_marker: str = DEFAULT_CELL_MARKER,
         register: bool = False,
     ):
-        self._sources = self._ensure_sources(source, cell_marker=cell_marker)
+        self._sources = self._ensure_sources(
+            [base_script, *spliced_scripts], cell_marker=cell_marker
+        )
         self.scope = self._build_scope(self._sources[0])
         self.register = register
 
     @staticmethod
     def _ensure_sources(
-        source: PathLike | Iterable[Union[PathLike, "FileSource", "InlineSource"]],
+        source: Iterable[Union[PathLike, "FileSource", "InlineSource"]],
         cell_marker: str,
     ) -> list[Union["FileSource", "InlineSource"]]:
-        if isinstance(source, (str, Path)):
-            return [FileSource(path=Path(source), cell_marker=cell_marker)]
-
         res: list["FileSource" | "InlineSource"] = []
         for item in source:
             if isinstance(item, (str, Path)):
