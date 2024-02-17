@@ -45,7 +45,7 @@ def format():
         "src",
         "tests",
         "setup.py",
-        "make.py",
+        "x.py",
     )
 
 
