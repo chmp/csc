@@ -24,11 +24,11 @@
         },
         {
           "name": "Check format",
-          "run": "python -m ruff format --check ."
+          "run": "python -m ruff format --check src"
         },
         {
           "name": "Check lints",
-          "run": "python -m ruff check ."
+          "run": "python -m ruff check src"
         },
         {
           "name": "Tests",
