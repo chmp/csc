@@ -8,7 +8,7 @@ pip install csc
 
 ## Usage
 
-Consider a script to define and train a model
+Consider the following training script
 
 ```python
 #: parameters
@@ -38,9 +38,9 @@ script.run("save")
 
 Different scripts can be "spliced" together by specifying multiple scripts. The
 first script acts as the base script and defines the available cells. Subsequent
-scripts, spliced scripts, can extend the cells of the base script. All scripts
-share a single scope. For each cell, first the code of cell of the base script
-is executed and then the code of the cell of the spliced scripts.
+scripts, or spliced scripts, can extend the cells of the base script. All
+scripts share a single scope. For each cell, first the code of the base script
+is executed and then the code of the spliced scripts.
 
 
 ```python
@@ -75,7 +75,7 @@ $ python -m csc base_script.py -p batch_size=100 -p learning_rate=3e-4
 
 # is equivalent to
 $ python -m csc base_script.py parameters.py
-$ cat parameters
+$ cat parameters.py
 #: parameters
 batch_size=100
 learning_rate=3e-4
