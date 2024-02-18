@@ -1,4 +1,4 @@
-# `csc` - Tools for non standard Python execution
+# `csc` -  Execute python scripts cell by cell
 
 Install with
 
@@ -39,9 +39,8 @@ script.run("save")
 Different scripts can be "spliced" together by specifying multiple scripts. The
 first script acts as the base script and defines the available cells. Subsequent
 scripts, spliced scripts, can extend the cells of the base script. All scripts
-share a single scope and cells are executed after each other. For each cell,
-first the cell of the base script is executed and then any cells of the same
-name defined in spliced scripts.
+share a single scope. For each cell, first the code of cell of the base script
+is executed and then the code of the cell of the spliced scripts.
 
 
 ```python
@@ -58,7 +57,7 @@ scripts = csc.Script(["experiment.py", "parameters.py"])
 scripts.run("parameters")
 ```
 
-### CLI
+### Command line usage
 
 `csc` include a command line script splice and execute scripts. Usage:
 
